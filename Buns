@@ -1,10 +1,11 @@
--- KZM v3.1 — Premium reskin on proven v1.7 structure
+-- KZM v3.1 — Full UI + TBO TP system (no emojis, no Side Dash Assist, Respawn in Combat, 1HP button)
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local TweenService      = game:GetService("TweenService")
 local UserInputService  = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local RS                = game:GetService("ReplicatedStorage")
+local ReplicatedStorage = RS
 local LocalPlayer       = Players.LocalPlayer
 
 -- ── COLOURS ──────────────────────────────────────────────────
@@ -27,6 +28,7 @@ local C = {
     white     = Color3.fromRGB(255, 255,255),
     red       = Color3.fromRGB(220, 50,  80),
     redLo     = Color3.fromRGB(140, 20,  45),
+    darkPurple = Color3.fromRGB(80, 20, 80),
 }
 
 -- ── SCREEN GUI ───────────────────────────────────────────────
@@ -450,10 +452,10 @@ local function makeToggle(parent, labelText, default, callback)
     return row, setState, function() return isOn end
 end
 
-local function makeButton(parent, labelText, callback)
+local function makeButton(parent, labelText, callback, bgColor)
     local row = Instance.new("TextButton")
     row.Size             = UDim2.new(1, -8, 0, 34)
-    row.BackgroundColor3 = C.accent2
+    row.BackgroundColor3 = bgColor or C.accent2
     row.BorderSizePixel  = 0
     row.Text             = labelText
     row.TextColor3       = C.white
@@ -475,7 +477,7 @@ local function makeButton(parent, labelText, callback)
     row.MouseButton1Click:Connect(function()
         TweenService:Create(row, TweenInfo.new(0.08), {BackgroundColor3 = C.accentHi}):Play()
         task.delay(0.15, function()
-            TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = C.accent2}):Play()
+            TweenService:Create(row, TweenInfo.new(0.15), {BackgroundColor3 = bgColor or C.accent2}):Play()
         end)
         if callback then callback() end
     end)
@@ -1053,196 +1055,133 @@ local function getNearestTarget()
 end
 
 -- ==========================================
--- RESPAWN SYSTEM (Instant Respawn + Health Check Loop)
+-- INSTANT RESPAWN LOGIC (from standalone)
 -- ==========================================
--- Variables
-local respawnEnabled = false
-local isRespawning = false
-local respawnConnections = {}
-local healthCheckConnection = nil
+local hasHookMetamethod = type(hookmetamethod) == "function"
+local hasCheckcaller = type(checkcaller) == "function"
+local hasNewcclosure = type(newcclosure) == "function"
+local hasReplicatesignal = type(replicatesignal) == "function"
 
--- Core respawn function: spam teleport and kill
-local function autoRespawn()
-    if isRespawning then return end
-    isRespawning = true
-    local char = LocalPlayer.Character
-    if not char then
-        isRespawning = false
-        return
-    end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then
-        isRespawning = false
-        return
-    end
+local instantRespawnEnabled = false
+local spState = { enabled = false, loc = CFrame.new() }
+local svColls = {}
+local ncConn = nil
+local bpHb = nil
+local oldIdx = nil
+local oldNc = nil
 
-    print("[Respawn] Spamming void teleports until death.")
-
-    -- Noclip
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.CanCollide = false
-        end
-    end
-
-    -- Ragdoll
-    for _, child in ipairs(char:GetDescendants()) do
-        if child:IsA("Motor6D") or child:IsA("Weld") then
-            pcall(child.Destroy, child)
-        end
-    end
-
-    -- Spam teleport loop (max 2 seconds)
-    local startTime = tick()
-    local teleportConn
-    teleportConn = RunService.Heartbeat:Connect(function()
-        if not char or not char.Parent or not hrp or not hrp.Parent then
-            teleportConn:Disconnect()
-            isRespawning = false
-            return
-        end
-        if hrp then
-            hrp.CFrame = CFrame.new(0, 10000, 0)
-            task.wait(0.02)
-            hrp.CFrame = CFrame.new(0, -1000, 0)
-        end
-        if tick() - startTime > 2 then
-            teleportConn:Disconnect()
-            pcall(function() LocalPlayer:LoadCharacter() end)
-            isRespawning = false
-        end
-    end)
-
-    hum.Health = 0
-    hum:TakeDamage(math.huge)
-    hum:ChangeState(Enum.HumanoidStateType.Dead)
-end
-
--- Manual respawn
-local function manualRespawn()
-    print("[Respawn] Manual respawn.")
-    local function tryRemotes(container)
-        for _, obj in ipairs(container:GetDescendants()) do
-            if obj:IsA("RemoteEvent") then
-                local n = obj.Name:lower()
-                if n:find("reset") or n:find("respawn") or n:find("die") or n:find("death") then
-                    pcall(function() obj:FireServer() end)
-                    pcall(function() obj:FireServer(LocalPlayer) end)
-                end
-            end
-        end
-    end
-    tryRemotes(game)
-    tryRemotes(LocalPlayer)
-    task.wait(0.2)
-    pcall(function() LocalPlayer:LoadCharacter() end)
-    print("[Respawn] Manual complete.")
-end
-
--- Setup hooks for death detection
-local function setupHooks()
-    for _, conn in ipairs(respawnConnections) do
-        conn:Disconnect()
-    end
-    respawnConnections = {}
-
-    local function attachToChar(char)
-        if not char then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
-
-        print("[Respawn] Attaching hooks to", char.Name)
-
-        local healthConn = hum:GetPropertyChangedSignal("Health"):Connect(function()
-            if not respawnEnabled then return end
-            if hum.Health <= 0 and hum.Health < 1 then
-                print("[Respawn] Health hit 0")
-                autoRespawn()
-            end
-        end)
-        table.insert(respawnConnections, healthConn)
-
-        local diedConn = hum.Died:Connect(function()
-            if not respawnEnabled then return end
-            print("[Respawn] Died event")
-            autoRespawn()
-        end)
-        table.insert(respawnConnections, diedConn)
-
-        local stateConn = hum.StateChanged:Connect(function(old, new)
-            if not respawnEnabled then return end
-            if new == Enum.HumanoidStateType.Dead then
-                print("[Respawn] State Dead")
-                autoRespawn()
-            end
-            if new == Enum.HumanoidStateType.Physics and hum.Health <= 0 then
-                print("[Respawn] Physics + health<=0")
-                autoRespawn()
-            end
-        end)
-        table.insert(respawnConnections, stateConn)
-
-        local removeConn = LocalPlayer.CharacterRemoving:Connect(function(charRemoved)
-            if charRemoved == char and respawnEnabled then
-                print("[Respawn] CharacterRemoving")
-                autoRespawn()
-            end
-        end)
-        table.insert(respawnConnections, removeConn)
-    end
-
-    if LocalPlayer.Character then
-        attachToChar(LocalPlayer.Character)
-    end
-
-    local addedConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
-        task.wait(0.1)
-        attachToChar(newChar)
-    end)
-    table.insert(respawnConnections, addedConn)
-
-    print("[Respawn] Hooks active.")
-end
-
--- Turn on respawn
-local function turnOnRespawn()
-    if respawnEnabled then return end
-    respawnEnabled = true
-    print("[Respawn] Enabled.")
-
-    setupHooks()
-
-    -- Start rapid health check loop
-    if healthCheckConnection then healthCheckConnection:Disconnect() end
-    healthCheckConnection = RunService.Heartbeat:Connect(function()
-        if not respawnEnabled then return end
+local function applyNoCollide(dur)
+    if ncConn then pcall(function() ncConn:Disconnect() end) end
+    table.clear(svColls)
+    local function disableCollisions()
         local char = LocalPlayer.Character
         if not char then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
-        if hum.Health <= 0 and hum.Health < 1 then
-            print("[Respawn] Health check loop triggered")
-            autoRespawn()
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then
+                if svColls[p] == nil then svColls[p] = p.CanCollide end
+                p.CanCollide = false
+            end
         end
+    end
+    disableCollisions()
+    ncConn = RunService.Stepped:Connect(disableCollisions)
+    task.delay(dur, function()
+        if ncConn then pcall(function() ncConn:Disconnect() end) end
+        local char = LocalPlayer.Character
+        if char then
+            for p, can in pairs(svColls) do
+                if p and p.Parent then p.CanCollide = can end
+            end
+        end
+        table.clear(svColls)
     end)
 end
 
--- Turn off respawn
-local function turnOffRespawn()
-    if not respawnEnabled then return end
-    respawnEnabled = false
-    print("[Respawn] Disabled.")
+local function triggerRespawnBypass()
+    if not hasHookMetamethod or not hasCheckcaller or not hasNewcclosure then return end
+    if not instantRespawnEnabled then return end
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+    if not hrp or not hum then return end
 
-    if healthCheckConnection then
-        healthCheckConnection:Disconnect()
-        healthCheckConnection = nil
-    end
+    applyNoCollide(5)
+    spState.enabled = true
+    pcall(function()
+        if hasReplicatesignal then replicatesignal(hum.ServerBreakJoints) end
+    end)
+    if bpHb then pcall(function() bpHb:Disconnect() end) end
+    bpHb = RunService.Heartbeat:Connect(function()
+        if not spState.enabled then
+            if bpHb then pcall(function() bpHb:Disconnect() end) end
+            return
+        end
+        local c = LocalPlayer.Character
+        local root = c and c:FindFirstChild("HumanoidRootPart")
+        if root then
+            spState.loc = root.CFrame
+            root.CFrame = CFrame.new(0, 10000, 0)
+            task.wait()
+            if root and root.Parent then root.CFrame = spState.loc end
+        end
+    end)
+    task.delay(0.5, function()
+        spState.enabled = false
+        if bpHb then pcall(function() bpHb:Disconnect() end) end
+    end)
+end
 
-    for _, conn in ipairs(respawnConnections) do
-        conn:Disconnect()
+-- Set up hooks once
+if hasHookMetamethod and hasCheckcaller and hasNewcclosure then
+    oldIdx = hookmetamethod(game, "__index", newcclosure(function(self, idx)
+        if not instantRespawnEnabled then return oldIdx(self, idx) end
+        if spState.enabled and not checkcaller() and idx == "CFrame" then
+            local char = LocalPlayer.Character
+            if char and self == char:FindFirstChild("HumanoidRootPart") then
+                return spState.loc
+            end
+        end
+        return oldIdx(self, idx)
+    end))
+end
+
+local resetRem = nil
+pcall(function()
+    resetRem = ReplicatedStorage:WaitForChild("Knit", 5)
+            :WaitForChild("Knit", 5)
+            :WaitForChild("Services", 5)
+            :WaitForChild("JoinService", 5)
+            :WaitForChild("RE", 5)
+            :WaitForChild("Reset", 5)
+end)
+
+if resetRem and hasHookMetamethod and hasNewcclosure then
+    oldNc = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        if not instantRespawnEnabled then return oldNc(self, ...) end
+        if self == resetRem and getnamecallmethod() == "FireServer" then
+            if bpHb then pcall(function() bpHb:Disconnect() end) end
+            spState.enabled = false
+            task.spawn(triggerRespawnBypass)
+        end
+        return oldNc(self, ...)
+    end))
+end
+
+-- One‑shot instant respawn function (now silent – no notification)
+local function instantRespawnNow()
+    if not (hasHookMetamethod and hasCheckcaller and hasNewcclosure) then
+        pcall(function() LocalPlayer:LoadCharacter() end)
+        return
     end
-    respawnConnections = {}
+    instantRespawnEnabled = true
+    task.spawn(function()
+        triggerRespawnBypass()
+        task.wait(0.6)
+        instantRespawnEnabled = false
+        spState.enabled = false
+        if bpHb then pcall(function() bpHb:Disconnect() end); bpHb = nil end
+        if ncConn then pcall(function() ncConn:Disconnect() end); ncConn = nil end
+    end)
 end
 
 -- ==========================================
@@ -1269,144 +1208,230 @@ makeToggle(mainS, "No Parkour Cooldown", true, function(state)
 end)
 
 -- ==========================================
--- FLY FEATURE
+-- FLY FEATURE (advanced – from jjs.release)
 -- ==========================================
-local FLY_SPEED   = 50
-local flyActive   = false
-local flyConn     = nil
-local flyAnimTrack = nil
+local FLY_SPEED    = 180
+local FLY_BOOST    = 400
+local FLY_SLOW     = 80
+local FLY_FOV      = 35
 
-local FLY_ANIM_ID = "rbxassetid://616006778"
+local flyActive    = false
+local flyConn      = nil
+local flyBoost     = false
+local flySlow      = false
+local flyBv        = nil
+local flyBg        = nil
+local flyTrk       = nil
+local flyIdl       = nil
+local flyWfx       = nil
+local flyWnd       = nil
+local flySfx       = nil
+local flyFov0      = 70
+local flyWfxOn     = false
+local flyBooped    = false
+local flyDconn     = nil
 
-local function startFly()
-    if flyActive then return end
-    local char = LocalPlayer.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then return end
+-- Helper functions (local)
+local function getHRP(c) return c and c:FindFirstChild("HumanoidRootPart") end
+local function getAlive(c) local h = c and c:FindFirstChildOfClass("Humanoid"); return h and h.Health > 0 and h or nil end
+local function getTracks(h) return h and h:GetPlayingAnimationTracks() or {} end
 
-    flyActive = true
+-- Animation assets (will fall back to idle if missing)
+local rushAnim = RS.Animations and RS.Animations.Itadori and RS.Animations.Itadori:FindFirstChild("Rush")
+local hoverAnim = Instance.new("Animation")
+hoverAnim.AnimationId = "rbxassetid://96310332498648"  -- floating idle (generic)
 
-    hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
-    hum:SetStateEnabled(Enum.HumanoidStateType.Landed,   false)
-    hum:SetStateEnabled(Enum.HumanoidStateType.Jumping,  false)
-    hum:ChangeState(Enum.HumanoidStateType.Physics)
-
-    pcall(function()
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            local anim = Instance.new("Animation")
-            anim.AnimationId = FLY_ANIM_ID
-            flyAnimTrack = animator:LoadAnimation(anim)
-            flyAnimTrack.Priority = Enum.AnimationPriority.Action4
-            flyAnimTrack:Play()
-        end
-    end)
-
-    local bv = Instance.new("BodyVelocity")
-    bv.Name      = "FlyBV"
-    bv.MaxForce  = Vector3.new(1e5, 1e5, 1e5)
-    bv.Velocity  = Vector3.zero
-    bv.Parent    = hrp
-
-    local bg = Instance.new("BodyGyro")
-    bg.Name      = "FlyBG"
-    bg.MaxTorque = Vector3.new(0, 1e5, 0)
-    bg.P         = 1e4
-    bg.D         = 400
-    bg.CFrame    = hrp.CFrame
-    bg.Parent    = hrp
-
-    flyConn = RunService.Heartbeat:Connect(function()
-        local c = LocalPlayer.Character
-        if not c then return end
-        local root = c:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        local fbv = root:FindFirstChild("FlyBV")
-        local fbg = root:FindFirstChild("FlyBG")
-        if not fbv or not fbg then return end
-
-        local cam     = workspace.CurrentCamera
-        local camCF   = cam.CFrame
-        local moveDir = Vector3.zero
-
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            moveDir = moveDir + camCF.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            moveDir = moveDir - camCF.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            moveDir = moveDir - camCF.RightVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            moveDir = moveDir + camCF.RightVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space)
-        or UserInputService:IsKeyDown(Enum.KeyCode.Q) then
-            moveDir = moveDir + Vector3.new(0, 1, 0)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-        or UserInputService:IsKeyDown(Enum.KeyCode.E) then
-            moveDir = moveDir - Vector3.new(0, 1, 0)
-        end
-
-        if moveDir.Magnitude > 0 then
-            fbv.Velocity = moveDir.Unit * FLY_SPEED
-            local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z)
-            if flatDir.Magnitude > 0.1 then
-                fbg.CFrame = CFrame.new(root.Position, root.Position + flatDir)
-            end
-        else
-            fbv.Velocity = Vector3.zero
-        end
-    end)
-end
+-- Sound assets (optional – ignore if missing)
+local windAsset = RS.Utils and RS.Utils.Naoya and RS.Utils.Naoya:FindFirstChild("FlyWind")
+local loopSound = RS.Sounds and RS.Sounds.Megumi and RS.Sounds.Megumi.Serpent and RS.Sounds.Megumi.Serpent:FindFirstChild("Fly")
+local boomSound = RS.Sounds and RS.Sounds.Naoya and RS.Sounds.Naoya.TopSpeed and RS.Sounds.Naoya.TopSpeed:FindFirstChild("SonicBoom")
 
 local function stopFly()
     if not flyActive then return end
     flyActive = false
-
+    flyBoost = false
+    flySlow = false
     if flyConn then flyConn:Disconnect(); flyConn = nil end
-
-    if flyAnimTrack then
-        pcall(function() flyAnimTrack:Stop() end)
-        flyAnimTrack = nil
+    if flyDconn then flyDconn:Disconnect(); flyDconn = nil end
+    if flyTrk then flyTrk:Stop(0.3); flyTrk = nil end
+    if flyIdl then flyIdl:Stop(0.3); flyIdl = nil end
+    if flyBv then
+        local rt = getHRP(LocalPlayer.Character)
+        if rt then rt.AssemblyLinearVelocity = flyBv.Velocity end
+        flyBv:Destroy(); flyBv = nil
     end
-
-    local char = LocalPlayer.Character
-    if char then
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local fbv = hrp:FindFirstChild("FlyBV")
-            local fbg = hrp:FindFirstChild("FlyBG")
-            if fbv then fbv:Destroy() end
-            if fbg then fbg:Destroy() end
-        end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
-            hum:SetStateEnabled(Enum.HumanoidStateType.Landed,   true)
-            hum:SetStateEnabled(Enum.HumanoidStateType.Jumping,  true)
-            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-        end
+    if flyBg then flyBg:Destroy(); flyBg = nil end
+    if flyWnd then flyWnd:Destroy(); flyWnd = nil end
+    if flySfx then flySfx:Stop(); flySfx:Destroy(); flySfx = nil end
+    flyWfx, flyWfxOn, flyBooped = nil, false, false
+    local cam = workspace.CurrentCamera
+    if cam then cam.FieldOfView = flyFov0 end
+    local ch = LocalPlayer.Character
+    if ch then
+        local h = ch:FindFirstChildOfClass("Humanoid")
+        if h then h.PlatformStand = false end
+        local a = ch:FindFirstChild("Animate")
+        if a then a.Disabled = false end
     end
 end
 
-LocalPlayer.CharacterAdded:Connect(function()
-    flyActive    = false
-    flyConn      = nil
-    flyAnimTrack = nil
-end)
+local function startFly()
+    if flyActive then return end
+    local ch = LocalPlayer.Character
+    local hrp = getHRP(ch)
+    local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+    if not (hrp and hum) then return end
 
-makeToggle(mainS, "Fly", false, function(state)
+    flyActive = true
+    flyBooped = false
+    flyWfxOn = false
+
+    local a = ch:FindFirstChild("Animate")
+    if a then a.Disabled = true end
+    hum.PlatformStand = true
+    for _, t in getTracks(hum) do t:Stop(0.1) end
+
+    local anm = hum:FindFirstChildOfClass("Animator")
+    if rushAnim and anm then
+        flyTrk = anm:LoadAnimation(rushAnim)
+        flyTrk.Priority = Enum.AnimationPriority.Action4
+    end
+    flyIdl = anm and anm:LoadAnimation(hoverAnim) or hum:LoadAnimation(hoverAnim)
+    flyIdl.Priority = Enum.AnimationPriority.Action4
+
+    flyBv = Instance.new("BodyVelocity")
+    flyBv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    flyBv.Velocity = hrp.AssemblyLinearVelocity
+    flyBv.Parent = hrp
+
+    flyBg = Instance.new("BodyGyro")
+    flyBg.P, flyBg.D = 35000, 1200
+    flyBg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBg.CFrame = hrp.CFrame
+    flyBg.Parent = hrp
+
+    local cam = workspace.CurrentCamera
+    flyFov0 = cam.FieldOfView
+
+    if windAsset then
+        flyWnd = windAsset:Clone()
+        flyWfx = {}
+        for _, v in flyWnd:GetDescendants() do
+            if v:IsA("Trail") or v:IsA("ParticleEmitter") then
+                v.Enabled = false
+                flyWfx[#flyWfx + 1] = v
+            end
+        end
+        flyWnd.Parent = cam
+    end
+
+    if loopSound then
+        flySfx = loopSound:Clone()
+        flySfx.Looped = true
+        flySfx.Volume = 0
+        flySfx.Parent = hrp
+        flySfx:Play()
+    end
+
+    flyDconn = hum.Died:Once(stopFly)
+
+    flyConn = RunService.RenderStepped:Connect(function()
+        if not (flyActive and hrp.Parent and hum.Parent) then stopFly(); return end
+        local cf = cam.CFrame
+        local md = hum.MoveDirection
+        local mv = Vector3.zero
+        if md.Magnitude > 0.1 then
+            local horizontal = Vector3.new(md.X, 0, md.Z)
+            local forwardDot = md:Dot(Vector3.new(cf.LookVector.X, 0, cf.LookVector.Z).Unit)
+            local pitch = cf.LookVector.Y
+            local sign = forwardDot >= 0 and 1 or -1
+            local vertical = Vector3.new(0, pitch * horizontal.Magnitude * sign, 0)
+            mv = horizontal + vertical
+        end
+
+        local fast = flyBoost or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+        local slow = not fast and (flySlow or UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt))
+        local spd = fast and FLY_BOOST or (slow and FLY_SLOW or FLY_SPEED)
+
+        if fast and mv.Magnitude > 0 then
+            if not flyBooped and boomSound then
+                local b = boomSound:Clone()
+                b.Volume = 0.5
+                b.Parent = hrp
+                b:Play()
+                game:GetService("Debris"):AddItem(b, 3)
+            end
+            flyBooped = true
+        else
+            flyBooped = false
+        end
+
+        if mv.Magnitude > 0 then
+            local u = mv.Unit
+            flyBv.Velocity = flyBv.Velocity:Lerp(u * spd, 0.12)
+            flyBg.CFrame = flyBg.CFrame:Lerp(CFrame.lookAt(Vector3.zero, u) * CFrame.Angles(0, 0, math.rad(-cf.RightVector:Dot(u) * 35)), 0.1)
+            if flyIdl and flyIdl.IsPlaying then flyIdl:Stop(0.3) end
+            if flyTrk then
+                if not flyTrk.IsPlaying then flyTrk:Play(0.3) end
+                flyTrk.TimePosition = 0.67
+                flyTrk:AdjustSpeed(0)
+            end
+            if flyWnd then
+                flyWnd.CFrame = CFrame.lookAlong(hrp.Position, flyBv.Velocity)
+                if not flyWfxOn then
+                    for _, v in flyWfx do v.Enabled = true end
+                    flyWfxOn = true
+                end
+            end
+            if flySfx then
+                flySfx.Volume = flySfx.Volume:Lerp(fast and 1.5 or 0.8, 0.1)
+                flySfx.PlaybackSpeed = flySfx.PlaybackSpeed:Lerp(fast and 1.2 or 0.9, 0.1)
+            end
+        else
+            flyBv.Velocity = flyBv.Velocity:Lerp(Vector3.zero, 0.1)
+            local lv = cf.LookVector
+            flyBg.CFrame = flyBg.CFrame:Lerp(CFrame.lookAt(Vector3.zero, Vector3.new(lv.X, 0, lv.Z)), 0.06)
+            if flyTrk and flyTrk.IsPlaying then flyTrk:Stop(0.3) end
+            if flyIdl and not flyIdl.IsPlaying then flyIdl:Play(0.3) end
+            if flySfx then flySfx.Volume = flySfx.Volume:Lerp(0, 0.1) end
+            if flyWnd and flyWfxOn then
+                for _, v in flyWfx do v.Enabled = false end
+                flyWfxOn = false
+            end
+        end
+
+        cam.FieldOfView = cam.FieldOfView:Lerp(flyFov0 + FLY_FOV * (flyBv.Velocity.Magnitude / 400), 0.08)
+    end)
+end
+
+-- Expose functions for the UI
+local function toggleFly(state)
     if state then startFly() else stopFly() end
+end
+
+-- Fly UI elements
+makeToggle(mainS, "Fly", false, function(state)
+    toggleFly(state)
 end)
 
-makeSlider(mainS, "Fly Speed", 10, 300, 50, function(v)
+makeSlider(mainS, "Fly Speed", 20, 400, 180, function(v)
     FLY_SPEED = v
 end)
+
+makeSlider(mainS, "Boost Speed", 50, 800, 400, function(v)
+    FLY_BOOST = v
+end)
+
+makeSlider(mainS, "Slow Speed", 5, 200, 80, function(v)
+    FLY_SLOW = v
+end)
+
+makeSlider(mainS, "FOV Kick", 0, 60, 35, function(v)
+    FLY_FOV = v
+end)
+
+-- Boost / Slow are toggled by holding LeftControl / LeftAlt.
+-- No additional UI needed.
 
 makeToggle(mainS, "Fullbright", false, function(state)
     game:GetService("Lighting").Brightness = state and 5 or 1
@@ -1597,29 +1622,27 @@ makeToggle(combatS, "Yuji 100% Blackflash", true, function(state)
     end
 end)
 
--- ── RESPAWN SECTION (added) ──
+-- ── RESPAWN SECTION ──
 makeSectionRow(combatS, "Respawn")
 
--- Toggle for auto respawn
-makeToggle(combatS, "Auto Respawn", false, function(state)
-    if state then
-        turnOnRespawn()
-    else
-        turnOffRespawn()
-    end
+-- Force Reset: now silent (no notification)
+makeButton(combatS, "Force Reset", function()
+    instantRespawnNow()
 end)
 
--- Manual respawn button
-makeButton(combatS, "Manual Respawn", function()
-    manualRespawn()
-end)
+-- 1HP button (one‑shot kill)
+makeButton(combatS, "1HP", function()
+    pcall(function()
+        replicatesignal(game.Players.LocalPlayer.Kill)
+    end)
+end, C.red)
 
 -- ==========================================
--- TARGET TAB (Teleports + Spectate)
+-- TARGET TAB (TBO-style TP system, no emojis)
 -- ==========================================
 local targetTab = scrolls["Target"]
 
--- Shared TP functions
+-- Shared functions
 local function resetChar()
     workspace.FallenPartsDestroyHeight = -150
     local char = LocalPlayer.Character
@@ -1639,13 +1662,26 @@ local function isAlive(player)
     return hum ~= nil and hum.Health > 0
 end
 
-local function breakJoints(char)
-    if not char then return end
-    for _, child in ipairs(char:GetDescendants()) do
-        if child:IsA("Motor6D") or child:IsA("Weld") or child:IsA("WeldConstraint") then
-            pcall(child.Destroy, child)
+local function getSortedPlayers()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local alive, dead = {}, {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            if isAlive(p) then table.insert(alive, p)
+            else table.insert(dead, p) end
         end
     end
+    if hrp then
+        table.sort(alive, function(a, b)
+            local aH = a.Character and a.Character:FindFirstChild("HumanoidRootPart")
+            local bH = b.Character and b.Character:FindFirstChild("HumanoidRootPart")
+            if not aH then return false end
+            if not bH then return true end
+            return (hrp.Position - aH.Position).Magnitude < (hrp.Position - bH.Position).Magnitude
+        end)
+    end
+    return alive, dead
 end
 
 -- TP Bypass
@@ -1686,73 +1722,173 @@ local function unantistuff()
     if antistuffConn then antistuffConn:Disconnect(); antistuffConn = nil end
 end
 
--- FAST TELEPORT
-local function tpToSpam(hrp, tHRP, tHum)
-    local predicted = tHRP.Position + (tHum.MoveDirection * 0.8 * tHum.WalkSpeed)
-    local dest = CFrame.new(predicted - tHRP.CFrame.LookVector * 2, predicted)
-    local char = LocalPlayer.Character
-
-    if tpBypassOn then unantistuff() end
-    breakJoints(char)
-
-    for i = 1, 3 do
-        hrp.CFrame = dest * CFrame.new(
-            math.random(-1, 1) * 0.05,
-            math.random(-1, 1) * 0.05,
-            math.random(-1, 1) * 0.05
-        )
-        hrp.AssemblyLinearVelocity = Vector3.zero
-    end
-    hrp.CFrame = dest
-
-    if tpBypassOn then antistuff() end
-    workspace.FallenPartsDestroyHeight = -150
-end
-
--- TP Bypass toggle
 makeToggle(targetTab, "TP Bypass", false, function(state)
     tpBypassOn = state
     if state then antistuff() else unantistuff() end
 end)
 
+-- ── Player Selection Panel ──
+local panelOpen = false
+local selectedPlayer = nil
+local playerPanel = Instance.new("Frame")
+playerPanel.Size = UDim2.new(0, 190, 0, 280)
+playerPanel.Position = UDim2.new(0.5, 70, 0.5, -140)
+playerPanel.BackgroundColor3 = C.bg
+playerPanel.BorderSizePixel = 0
+playerPanel.Visible = false
+playerPanel.ZIndex = 300
+playerPanel.Parent = screenGui
+makeCorner(playerPanel, 14)
+makeStroke(playerPanel, C.accent, 1.5, 0.3)
+
+local panelTitle = Instance.new("TextLabel")
+panelTitle.Size = UDim2.new(1, -36, 0, 36)
+panelTitle.Position = UDim2.new(0, 5, 0, 0)
+panelTitle.BackgroundColor3 = C.panel
+panelTitle.BorderSizePixel = 0
+panelTitle.Text = "Pick Player"
+panelTitle.TextColor3 = C.accentHi
+panelTitle.Font = Enum.Font.GothamBold
+panelTitle.TextSize = 13
+panelTitle.ZIndex = 301
+panelTitle.Parent = playerPanel
+makeCorner(panelTitle, 14)
+
+local panelClose = Instance.new("TextButton")
+panelClose.Size = UDim2.new(0, 30, 0, 30)
+panelClose.Position = UDim2.new(1, -34, 0, 3)
+panelClose.BackgroundColor3 = C.redLo
+panelClose.Text = "X"
+panelClose.TextColor3 = C.white
+panelClose.Font = Enum.Font.GothamBold
+panelClose.TextSize = 13
+panelClose.BorderSizePixel = 0
+panelClose.ZIndex = 302
+panelClose.Parent = playerPanel
+makeCorner(panelClose, 8)
+
+local playerScroll = Instance.new("ScrollingFrame")
+playerScroll.Size = UDim2.new(1, -10, 1, -44)
+playerScroll.Position = UDim2.new(0, 5, 0, 40)
+playerScroll.BackgroundTransparency = 1
+playerScroll.BorderSizePixel = 0
+playerScroll.ScrollBarThickness = 3
+playerScroll.ScrollBarImageColor3 = C.accent
+playerScroll.ZIndex = 301
+playerScroll.Parent = playerPanel
+
+local playerListLayout = Instance.new("UIListLayout")
+playerListLayout.SortOrder = Enum.SortOrder.Name
+playerListLayout.Padding = UDim.new(0, 4)
+playerListLayout.Parent = playerScroll
+
+local function updatePlayerList()
+    for _, c in ipairs(playerScroll:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    local alive, dead = getSortedPlayers()
+    local all = {}
+    for _, p in ipairs(alive) do table.insert(all, {p, true}) end
+    for _, p in ipairs(dead) do table.insert(all, {p, false}) end
+    for _, data in ipairs(all) do
+        local p = data[1]
+        local aliveFlag = data[2]
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, 0, 0, 38)
+        btn.BackgroundColor3 = C.row
+        btn.BorderSizePixel = 0
+        btn.Text = (aliveFlag and "[A] " or "[D] ") .. p.Name
+        btn.TextSize = 12
+        btn.Font = Enum.Font.GothamBold
+        btn.TextColor3 = aliveFlag and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
+        btn.ZIndex = 302
+        btn.Parent = playerScroll
+        makeCorner(btn, 8)
+        btn.MouseButton1Click:Connect(function()
+            selectedPlayer = p
+            panelOpen = false
+            playerPanel.Visible = false
+            setTargetStatus("Selected: " .. p.Name, Color3.fromRGB(200, 180, 80))
+        end)
+        btn.MouseEnter:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = C.rowHover}):Play()
+        end)
+        btn.MouseLeave:Connect(function()
+            TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = C.row}):Play()
+        end)
+    end
+    playerScroll.CanvasSize = UDim2.new(0, 0, 0, #all * 42)
+end
+
+panelClose.MouseButton1Click:Connect(function()
+    panelOpen = false
+    playerPanel.Visible = false
+end)
+
+-- ── TP functions ──
+local function setTeleportStatus(msg, color)
+    local statusRow = targetTab:FindFirstChild("StatusRow")
+    if statusRow then
+        local lbl = statusRow:FindFirstChild("StatusLabel")
+        if lbl then
+            lbl.Text = msg
+            lbl.TextColor3 = color or C.textDim
+        end
+    end
+end
+
+local function teleportTo(targetHRP, targetHum)
+    if not targetHRP then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local predicted = targetHRP.Position
+    if targetHum and targetHum.MoveDirection then
+        predicted = predicted + (targetHum.MoveDirection * 0.8 * targetHum.WalkSpeed)
+    end
+    local dest = CFrame.new(predicted.X, predicted.Y - 4.5, predicted.Z) * CFrame.Angles(math.rad(90), 0, 0)
+    if tpBypassOn then unantistuff() end
+    hrp.CFrame = dest
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    if tpBypassOn then antistuff() end
+end
+
+-- TP Nearest (button)
+makeButton(targetTab, "TP Nearest", function()
+    local targetInfo = getNearestTarget()
+    if not targetInfo then
+        setTeleportStatus("No valid target found", Color3.fromRGB(255, 100, 100))
+        return
+    end
+    teleportTo(targetInfo.root, targetInfo.humanoid)
+    setTeleportStatus("TP to nearest: " .. targetInfo.character.Name, Color3.fromRGB(100, 255, 100))
+end)
+
 -- TP Selected
 local tpSelOn = false
 local tpSelConn = nil
-local selectedPlayer = nil
 
 local function stopSelLoop()
     tpSelOn = false
     if tpSelConn then tpSelConn:Disconnect(); tpSelConn = nil end
+    setTPSelToggle(false)
     selectedPlayer = nil
-    if not tpBypassOn then unantistuff() end
-    workspace.FallenPartsDestroyHeight = -150
     resetChar()
+    setTeleportStatus("TP Selected OFF", Color3.fromRGB(150, 150, 150))
 end
 
-local playerNames = {}
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then table.insert(playerNames, p.Name) end
-end
-local tpSelDropdown, updateTpSelList, getTpSelPlayer = makeDropdown(targetTab, "TP Selected Target", playerNames, playerNames[1], function(value)
-    selectedPlayer = Players:FindFirstChild(value)
-end)
-
-makeToggle(targetTab, "TP Selected", false, function(state)
+local function toggleTPSelected(state)
     if state then
         if not selectedPlayer then
-            local first = Players:GetPlayers()[1]
-            if first and first ~= LocalPlayer then selectedPlayer = first end
-        end
-        if not selectedPlayer then
-            game:GetService("StarterGui"):SetCore("SendNotification", {
-                Title = "TP Selected",
-                Text = "No valid player found.",
-                Duration = 2
-            })
+            panelOpen = true
+            playerPanel.Visible = true
+            updatePlayerList()
+            setTeleportStatus("Pick a player first", Color3.fromRGB(255, 200, 100))
+            setTPSelToggle(false)
             return
         end
         tpSelOn = true
-        if not tpBypassOn then antistuff() end
         setTeleportStatus("TP -> " .. selectedPlayer.Name, Color3.fromRGB(255, 180, 80))
         if tpSelConn then tpSelConn:Disconnect(); tpSelConn = nil end
         tpSelConn = RunService.Heartbeat:Connect(function()
@@ -1766,88 +1902,76 @@ makeToggle(targetTab, "TP Selected", false, function(state)
             local tHRP = tChar:FindFirstChild("HumanoidRootPart")
             local tHum = tChar:FindFirstChildOfClass("Humanoid")
             if not tHRP or not tHum then return end
-            tpToSpam(hrp, tHRP, tHum)
+            teleportTo(tHRP, tHum)
         end)
     else
         stopSelLoop()
     end
-end)
+end
 
--- TP All Loop
+local tpSelRow, setTPSelToggle, getTPSelToggle = makeToggle(targetTab, "TP Selected", false, toggleTPSelected)
+
+-- TP All Loop (instant, random alive, stops when no alive)
 local tpLoopOn = false
 local tpLoopConn = nil
+local aliveCache = {}
+local refreshTimer = 0
 
-makeToggle(targetTab, "TP All Loop", false, function(state)
-    tpLoopOn = state
+local function stopLoop()
+    tpLoopOn = false
+    if tpLoopConn then tpLoopConn:Disconnect(); tpLoopConn = nil end
+    setTPLoopToggle(false)
+    resetChar()
+    setTeleportStatus("TP Loop OFF", Color3.fromRGB(150, 150, 150))
+end
+
+local function toggleTPLoop(state)
     if state then
-        if not tpBypassOn then antistuff() end
+        tpLoopOn = true
+        aliveCache = {}
+        refreshTimer = 0
+        setTeleportStatus("TP Loop ON", Color3.fromRGB(255, 80, 80))
         if tpLoopConn then tpLoopConn:Disconnect(); tpLoopConn = nil end
-
-        tpLoopConn = RunService.Heartbeat:Connect(function()
+        tpLoopConn = RunService.Heartbeat:Connect(function(dt)
             if not tpLoopOn then return end
-            local char = LocalPlayer.Character
-            if not char then return end
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp then return end
 
-            local alive = {}
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and isAlive(p) then
-                    table.insert(alive, p)
-                end
-            end
-
-            local target
-            if #alive > 0 then
-                target = alive[math.random(1, #alive)]
-            else
-                local dead = {}
+            refreshTimer = refreshTimer + dt
+            if refreshTimer >= 0.5 then
+                refreshTimer = 0
+                aliveCache = {}
                 for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LocalPlayer and not isAlive(p) then
-                        table.insert(dead, p)
+                    if p ~= LocalPlayer and isAlive(p) then
+                        table.insert(aliveCache, p)
                     end
                 end
-                if #dead > 0 then
-                    target = dead[math.random(1, #dead)]
-                end
             end
 
+            if #aliveCache == 0 then
+                setTeleportStatus("No alive targets", Color3.fromRGB(255, 200, 100))
+                return
+            end
+
+            local target = aliveCache[math.random(1, #aliveCache)]
             if target then
                 local tChar = target.Character
                 if tChar then
                     local tHRP = tChar:FindFirstChild("HumanoidRootPart")
                     local tHum = tChar:FindFirstChildOfClass("Humanoid")
                     if tHRP and tHum then
-                        tpToSpam(hrp, tHRP, tHum)
-                        local tag = isAlive(target) and "A" or "D"
-                        setTeleportStatus("🔁 " .. tag .. " " .. target.Name, Color3.fromRGB(255, 180, 100))
+                        teleportTo(tHRP, tHum)
+                        setTeleportStatus("TP " .. target.Name, Color3.fromRGB(255, 180, 100))
                     end
                 end
-            else
-                setTeleportStatus("🔁 No targets", Color3.fromRGB(200, 200, 200))
             end
         end)
     else
-        if tpLoopConn then tpLoopConn:Disconnect(); tpLoopConn = nil end
-        if not tpBypassOn then unantistuff() end
-        workspace.FallenPartsDestroyHeight = -150
-        resetChar()
-        setTeleportStatus("TP Loop OFF", Color3.fromRGB(150, 150, 150))
-    end
-end)
-
--- Status label for Teleport tab
-local function setTeleportStatus(msg, color)
-    local statusRow = targetTab:FindFirstChild("StatusRow")
-    if statusRow then
-        local lbl = statusRow:FindFirstChild("StatusLabel")
-        if lbl then
-            lbl.Text = msg
-            lbl.TextColor3 = color or C.textDim
-        end
+        stopLoop()
     end
 end
 
+local tpLoopRow, setTPLoopToggle, getTPLoopToggle = makeToggle(targetTab, "TP All Loop", false, toggleTPLoop)
+
+-- Status label
 local statusRowTp = Instance.new("Frame")
 statusRowTp.Name = "StatusRow"
 statusRowTp.Size = UDim2.new(1, -4, 0, 20)
@@ -1869,19 +1993,26 @@ statusLblTp.TextXAlignment = Enum.TextXAlignment.Center
 statusLblTp.ZIndex = 101
 statusLblTp.Parent = statusRowTp
 
--- ── SPECTATE FEATURE (Dropdown + Free Camera) ──────────────
+-- Select Target button
+makeButton(targetTab, "Select Target", function()
+    panelOpen = not panelOpen
+    playerPanel.Visible = panelOpen
+    if panelOpen then updatePlayerList() end
+end)
+
+-- ── SPECTATE FEATURE ──
 makeSectionRow(targetTab, "Spectate")
 
 local spectatePlayer = nil
 local spectateActive = false
 local spectateConnection = nil
-
--- Dropdown to select target player
+local playerNames = {}
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then table.insert(playerNames, p.Name) end
+end
 local spectateDropdown, updateSpectateDropdown, getSpectatePlayer = makeDropdown(targetTab, "Spectate Target", playerNames, playerNames[1], function(value)
     spectatePlayer = Players:FindFirstChild(value)
 end)
-
--- Toggle to start/stop spectating
 local spectateToggleRow, setSpectateToggle, getSpectateToggle = makeToggle(targetTab, "Spectate", false, function(state)
     spectateActive = state
     if state then
@@ -1927,7 +2058,7 @@ local spectateToggleRow, setSpectateToggle, getSpectateToggle = makeToggle(targe
 end)
 
 -- ==========================================
--- AUTO TAB
+-- AUTO TAB (unchanged)
 -- ==========================================
 local autoS = scrolls["Auto"]
 
@@ -2106,18 +2237,15 @@ end)
 makeSectionRow(autoS, "Todo")
 
 local perfectSwapActive = false
-local perfectSwapConn = nil
 local perfectSwapCharConn = nil
 local perfectSwapEventConn = nil
 local perfectSwapConnections = {}
-
 local function setupPerfectSwap(char)
     if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
     local animator = hum:FindFirstChildOfClass("Animator")
     if not animator then return end
-
     local animConn = animator.AnimationPlayed:Connect(function(track)
         if not perfectSwapActive then return end
         if track.Animation then
@@ -2152,23 +2280,16 @@ local function setupPerfectSwap(char)
     end)
     table.insert(perfectSwapConnections, animConn)
 end
-
 makeToggle(autoS, "Perfect Swap", true, function(state)
     if state then
         if perfectSwapActive then return end
         perfectSwapActive = true
         perfectSwapConnections = {}
         perfectSwapEventConn = nil
-
         local char = LocalPlayer.Character
-        if char then
-            setupPerfectSwap(char)
-        end
-
+        if char then setupPerfectSwap(char) end
         perfectSwapCharConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
-            if perfectSwapActive then
-                setupPerfectSwap(newChar)
-            end
+            if perfectSwapActive then setupPerfectSwap(newChar) end
         end)
         table.insert(perfectSwapConnections, perfectSwapCharConn)
     else
@@ -2187,7 +2308,6 @@ makeSectionRow(autoS, "Garuda")
 
 local autoGarudaConn = nil
 local autoGarudaTable = {}
-
 makeToggle(autoS, "Auto Garuda Rebound", false, function(state)
     if state then
         if autoGarudaConn then autoGarudaConn:Disconnect(); autoGarudaConn = nil end
@@ -2225,14 +2345,15 @@ makeToggle(autoS, "Auto Garuda Rebound", false, function(state)
 end)
 
 -- ==========================================
--- EXTRA TAB
+-- EXTRA TAB (Emote Unlocker + Item Grabber + Misc)
 -- ==========================================
 local extraS = scrolls["Extra"]
 
 makeSectionRow(extraS, "Emotes")
 
-makeButton(extraS, "Emote Unlocker", function()
-    local gp = game:GetService("Players").LocalPlayer:WaitForChild("Gamepasses")
+-- Silent emote unlocker – no notifications, no UI refreshes
+local function runEmoteUnlocker()
+    local gp = LocalPlayer:WaitForChild("Gamepasses")
     gp:SetAttribute("742180133", true)
     gp:SetAttribute("1151174294", true)
 
@@ -2257,14 +2378,12 @@ makeButton(extraS, "Emote Unlocker", function()
             if sw then sw.Visible = true end
         end
     end)
+end
 
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "Emote Unlocker",
-        Text = "Extra emote slots unlocked!",
-        Duration = 3
-    })
-end)
+task.spawn(runEmoteUnlocker)
+makeButton(extraS, "Emote Unlocker", runEmoteUnlocker)
 
+-- Item Grabber (unchanged)
 makeSectionRow(extraS, "Item Grabber")
 
 local KNOWN_ITEMS = {
@@ -2377,7 +2496,7 @@ local dropdownRow, updateDropdown, getSelected = makeDropdown(extraS, "Select It
     selectedItemName = value
 end)
 
-makeButton(extraS, "⟳ Refresh Item List", function()
+makeButton(extraS, "Refresh Item List", function()
     local newList = scanItems()
     updateDropdown(newList, true)
     selectedItemName = #newList > 0 and newList[1] or ""
@@ -2391,7 +2510,6 @@ statusRowExtra.ZIndex = 100
 statusRowExtra.Parent = extraS
 makeCorner(statusRowExtra, 5)
 makeStroke(statusRowExtra, C.stroke, 1, 0.5)
-
 local statusLblExtra = Instance.new("TextLabel")
 statusLblExtra.Size = UDim2.new(1, 0, 1, 0)
 statusLblExtra.BackgroundTransparency = 1
@@ -2403,7 +2521,7 @@ statusLblExtra.TextXAlignment = Enum.TextXAlignment.Center
 statusLblExtra.ZIndex = 101
 statusLblExtra.Parent = statusRowExtra
 
-makeButton(extraS, "⬆ Pick Up Selected Item", function()
+makeButton(extraS, "Pick Up Selected Item", function()
     if selectedItemName == "" then
         statusLblExtra.Text = "No item selected"
         statusLblExtra.TextColor3 = Color3.fromRGB(255, 200, 100)
@@ -2419,7 +2537,7 @@ makeButton(extraS, "⬆ Pick Up Selected Item", function()
     statusLblExtra.TextColor3 = Color3.fromRGB(255, 200, 50)
     local success = instantGrab(targetPart, prompt)
     if success then
-        statusLblExtra.Text = "✓ Picked up!"
+        statusLblExtra.Text = "Picked up!"
         statusLblExtra.TextColor3 = Color3.fromRGB(100, 255, 100)
         task.delay(0.5, function()
             local newList = scanItems()
@@ -2429,7 +2547,7 @@ makeButton(extraS, "⬆ Pick Up Selected Item", function()
             statusLblExtra.TextColor3 = C.textDim
         end)
     else
-        statusLblExtra.Text = "✗ Failed"
+        statusLblExtra.Text = "Failed"
         statusLblExtra.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(1.5, function()
             statusLblExtra.Text = "Ready"
@@ -2440,7 +2558,6 @@ end)
 
 -- Walk into Domains
 makeSectionRow(extraS, "Domain")
-
 makeToggle(extraS, "Walk into Domains", false, function(state)
     if state then
         RunService:BindToRenderStep("Walk-Domain", 0, function()
@@ -2457,8 +2574,8 @@ makeToggle(extraS, "Walk into Domains", false, function(state)
     end
 end)
 
+-- Misc
 makeSectionRow(extraS, "Misc")
-
 makeToggle(extraS, "Anti AFK", false, function(state)
     _G.AntiAFK = state
     if state then
@@ -2473,11 +2590,9 @@ makeToggle(extraS, "Anti AFK", false, function(state)
         end)
     end
 end)
-
 makeButton(extraS, "Rejoin Server", function()
     game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
 end)
-
 makeButton(extraS, "Copy Server ID", function()
     setclipboard(game.JobId)
 end)
@@ -2488,17 +2603,14 @@ end)
 local configS = scrolls["Configs"]
 
 makeSectionRow(configS, "UI Settings")
-
 makeSlider(configS, "UI Transparency", 0, 90, 0, function(v)
     window.BackgroundTransparency = v / 100
 end)
-
 makeButton(configS, "Reset Position", function()
     window.Position = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2)
 end)
 
 makeSectionRow(configS, "Credits")
-
 local credLbl = Instance.new("Frame")
 credLbl.Size = UDim2.new(1, -4, 0, 36)
 credLbl.BackgroundColor3 = C.row
@@ -2506,11 +2618,10 @@ credLbl.BorderSizePixel = 0
 credLbl.ZIndex = 100
 credLbl.Parent = configS
 makeCorner(credLbl, 6)
-
 local credText = Instance.new("TextLabel")
 credText.Size = UDim2.new(1, 0, 1, 0)
 credText.BackgroundTransparency = 1
-credText.Text = "｢KZM」 • Made for JJS\nBuilt by KZM"
+credText.Text = "KZM - Made for JJS\nBuilt by KZM"
 credText.TextColor3 = C.textDim
 credText.Font = Enum.Font.Gotham
 credText.TextSize = 10
@@ -2528,10 +2639,8 @@ LocalPlayer.CharacterAdded:Connect(function()
     if tpSelConn then tpSelConn:Disconnect(); tpSelConn = nil end
     tpLoopOn = false
     if tpLoopConn then tpLoopConn:Disconnect(); tpLoopConn = nil end
-    workspace.FallenPartsDestroyHeight = -150
     selectedPlayer = nil
     setTeleportStatus("Respawned", Color3.fromRGB(100, 200, 100))
-    -- reset spectate
     if spectateConnection then spectateConnection:Disconnect(); spectateConnection = nil end
     spectateActive = false
     setSpectateToggle(false)
@@ -2551,4 +2660,4 @@ task.defer(function()
     end)
 end)
 
-print("KZM v3.1 loaded — Respawn integrated, Side Dash Assist removed")
+print("KZM v3.1 loaded — Fly: advanced with animations, effects, boost/slow via LeftControl/LeftAlt, FOV kick.")
