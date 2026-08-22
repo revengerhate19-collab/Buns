@@ -1072,7 +1072,7 @@ local oldNc = nil
 
 local function applyNoCollide(dur)
     if ncConn then pcall(function() ncConn:Disconnect() end) end
-    table.clear(svColls)
+    for k in next, svColls do svColls[k] = nil end
     local function disableCollisions()
         local char = LocalPlayer.Character
         if not char then return end
@@ -1093,7 +1093,7 @@ local function applyNoCollide(dur)
                 if p and p.Parent then p.CanCollide = can end
             end
         end
-        table.clear(svColls)
+        for k in next, svColls do svColls[k] = nil end
     end)
 end
 
@@ -1102,7 +1102,7 @@ local function triggerRespawnBypass()
     if not instantRespawnEnabled then return end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum then return end
 
     applyNoCollide(5)
@@ -1208,359 +1208,270 @@ makeToggle(mainS, "No Parkour Cooldown", true, function(state)
 end)
 
 -- ==========================================
--- FLY FEATURE — ported from jjs_release
+
 -- ==========================================
-local FLY_SPEED     = 180
-local FLY_BOOST_SPD = 400
-local FLY_SLOW_SPD  = 80
-local FLY_FOV_KICK  = 35
-
-local flyWant   = false
-local flyOn     = false
-local flyWfxOn  = false
-local flyFov0   = 70
-local flyBoomed = false
-
-local flyBV, flyBG, flySfx, flyTrk, flyIdl, flyConn, flyDconn
-local flyWfxList = {}
-local flyIsFallback = false
-local flyVFXFolder = nil
-
-local function flyLerp(a, b, t) return a + (b - a) * t end
-
-local function flyMoveVec()
-    local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if h then
-        local md = h.MoveDirection
-        if md.Magnitude > 0.1 then
-            local cam = workspace.CurrentCamera
-            local camYaw = CFrame.Angles(0, math.atan2(-cam.CFrame.LookVector.X, -cam.CFrame.LookVector.Z), 0)
-            local local2world = camYaw
-            local projected = local2world * Vector3.new(md.X, 0, md.Z)
-            return Vector3.new(-projected.X, 0, -projected.Z)
-        end
-    end
-    local x, z = 0, 0
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then z = z - 1 end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then z = z + 1 end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then x = x - 1 end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then x = x + 1 end
-    return Vector3.new(x, 0, z)
+-- FLY FEATURE (standalone port)
+-- ==========================================
+local flyAnimFolder = ReplicatedStorage:FindFirstChild("Animations")
+local flyRushAnim
+if flyAnimFolder then
+    local itadori = flyAnimFolder:FindFirstChild("Itadori")
+    if itadori then flyRushAnim = itadori:FindFirstChild("Rush") end
 end
 
+local flyHoverAnim = Instance.new("Animation")
+flyHoverAnim.AnimationId = "rbxassetid://96310332498648"
+
+local flySoundsFolder = ReplicatedStorage:FindFirstChild("Sounds")
+local flyLoopSound, flySonicBoomSound
+if flySoundsFolder then
+    local megumi = flySoundsFolder:FindFirstChild("Megumi")
+    if megumi then
+        local serpent = megumi:FindFirstChild("Serpent")
+        if serpent then flyLoopSound = serpent:FindFirstChild("Fly") end
+    end
+    local naoya = flySoundsFolder:FindFirstChild("Naoya")
+    if naoya then
+        local topSpeed = naoya:FindFirstChild("TopSpeed")
+        if topSpeed then flySonicBoomSound = topSpeed:FindFirstChild("SonicBoom") end
+    end
+end
+
+local flyUtilsFolder = ReplicatedStorage:FindFirstChild("Utils")
+local flyWindTemplate
+if flyUtilsFolder then
+    local naoyaUtils = flyUtilsFolder:FindFirstChild("Naoya")
+    if naoyaUtils then flyWindTemplate = naoyaUtils:FindFirstChild("FlyWind") end
+end
+
+local Fly = {
+    active    = false,
+    speed     = 180,
+    boostSpeed = 400,
+    slowSpeed  = 80,
+    fovKick   = 35,
+    boost     = false,
+    slow      = false,
+    want      = false,
+}
+
+local flyBV, flyBG, flyWindEff, flySoundInst, flyBoomInst
+local flyTrackRush, flyTrackHover
+local flyFov0 = 70
+local flyRunConn, flyRenderConn
+local flyWindParts = {}
+
 local function flyStop()
-    if not flyOn then return end
-    flyOn = false
-    if flyConn  then flyConn:Disconnect();  flyConn  = nil end
-    if flyDconn then flyDconn:Disconnect(); flyDconn = nil end
-    pcall(function() if flyTrk then flyTrk:Stop(0.3) end end)
-    pcall(function() if flyIdl then flyIdl:Stop(0.3) end end)
-    flyTrk, flyIdl = nil, nil
-    if flyBV then pcall(function() flyBV:Destroy() end); flyBV = nil end
+    Fly.active = false
+    Fly.boost  = false
+    Fly.slow   = false
+    if flyRunConn    then flyRunConn:Disconnect();    flyRunConn    = nil end
+    if flyRenderConn then flyRenderConn:Disconnect(); flyRenderConn = nil end
+    pcall(function() if flyTrackRush  then flyTrackRush:Stop(0.3)  end end)
+    pcall(function() if flyTrackHover then flyTrackHover:Stop(0.3) end end)
+    flyTrackRush, flyTrackHover = nil, nil
+    if flyBV then pcall(function()
+        local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if h then h.AssemblyLinearVelocity = flyBV.Velocity end
+        flyBV:Destroy()
+    end); flyBV = nil end
     if flyBG then pcall(function() flyBG:Destroy() end); flyBG = nil end
-    if flyVFXFolder then pcall(function() flyVFXFolder:Destroy() end); flyVFXFolder = nil end
-    if flySfx then pcall(function() flySfx:Stop(); flySfx:Destroy() end); flySfx = nil end
-    flyWfxList = {}
-    flyIsFallback = false
-    flyWfxOn = false
-    flyBoomed = false
+    if flyWindEff then pcall(function()
+        for _, v in pairs(flyWindParts) do if v and v.Parent then v.Enabled = false end end
+        flyWindEff:Destroy()
+    end); flyWindEff = nil end
+    flyWindParts = {}
+    if flySoundInst then pcall(function() flySoundInst:Stop(); flySoundInst:Destroy() end); flySoundInst = nil end
     pcall(function() workspace.CurrentCamera.FieldOfView = flyFov0 end)
     local ch = LocalPlayer.Character
     if not ch then return end
-    local h = ch:FindFirstChildOfClass("Humanoid")
-    if h then h.PlatformStand = false end
-    local a = ch:FindFirstChild("Animate")
-    if a then a.Disabled = false end
+    local hum = ch:FindFirstChildOfClass("Humanoid")
+    if hum then hum.PlatformStand = false end
+    local anim = ch:FindFirstChild("Animate")
+    if anim then anim.Disabled = false end
 end
 
 local function flyStart()
-    if flyOn then return end
-    local ch = LocalPlayer.Character
+    if Fly.active then return end
+    local ch  = LocalPlayer.Character
     if not ch then return end
-    local rt = ch:FindFirstChild("HumanoidRootPart")
-    local h  = ch:FindFirstChildOfClass("Humanoid")
-    if not rt or not h or h.Health <= 0 then return end
+    local hrp = ch:FindFirstChild("HumanoidRootPart")
+    local hum = ch:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 then return end
 
-    flyOn = true
-    flyBoomed = false
-    flyWfxOn = false
+    flyStop()
+    Fly.active = true
 
-    -- disable Animate so our anims take over
-    local animScript = ch:FindFirstChild("Animate")
-    if animScript then animScript.Disabled = true end
-    h.PlatformStand = true
+    local anim = ch:FindFirstChild("Animate")
+    if anim then anim.Disabled = true end
+    hum.PlatformStand = true
 
-    local animator = h:FindFirstChildOfClass("Animator")
+    local animator = hum:FindFirstChildOfClass("Animator")
     if animator then
         for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
             pcall(function() t:Stop(0.1) end)
         end
-    end
-
-    -- animations — created here to avoid top-level issues
-    if animator then
-        local hoverAnim = Instance.new("Animation")
-        hoverAnim.AnimationId = "rbxassetid://96310332498648"
-        local rushAnim = Instance.new("Animation")
-        rushAnim.AnimationId = "rbxassetid://656118852"
-
+        if flyRushAnim and animator then
+            pcall(function()
+                flyTrackRush = animator:LoadAnimation(flyRushAnim)
+                flyTrackRush.Priority = Enum.AnimationPriority.Action4
+            end)
+        end
         pcall(function()
-            flyIdl = animator:LoadAnimation(hoverAnim)
-            flyIdl.Priority = Enum.AnimationPriority.Action4
-            flyIdl:Play(0.3)
-        end)
-        pcall(function()
-            flyTrk = animator:LoadAnimation(rushAnim)
-            flyTrk.Priority = Enum.AnimationPriority.Action4
+            flyTrackHover = animator:LoadAnimation(flyHoverAnim)
+            flyTrackHover.Priority = Enum.AnimationPriority.Action4
         end)
     end
 
-    -- BodyVelocity
     flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    flyBV.Velocity = Vector3.new(0, 0, 0)
-    flyBV.Parent   = rt
+    flyBV.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+    flyBV.Velocity = hrp.AssemblyLinearVelocity
+    flyBV.Parent   = hrp
 
-    -- BodyGyro
     flyBG = Instance.new("BodyGyro")
     flyBG.P         = 35000
     flyBG.D         = 1200
-    flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-    flyBG.CFrame    = rt.CFrame
-    flyBG.Parent    = rt
+    flyBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+    flyBG.CFrame    = hrp.CFrame
+    flyBG.Parent    = hrp
 
-    local cam = workspace.CurrentCamera
-    flyFov0 = cam.FieldOfView
-
-    -- VFX: try to clone JJS wind, else use custom trail + particles
-    local windSrc = RS:FindFirstChild("Utils")
-        and RS.Utils:FindFirstChild("Naoya")
-        and RS.Utils.Naoya:FindFirstChild("FlyWind")
-
-    flyVFXFolder = Instance.new("Folder")
-    flyVFXFolder.Name   = "FlyVFX"
-    flyVFXFolder.Parent = rt
-
-    if windSrc then
-        local wnd = windSrc:Clone()
-        wnd.Parent = cam
-        local wfx = {}
-        for _, v in ipairs(wnd:GetDescendants()) do
+    if flyWindTemplate then
+        flyWindEff = flyWindTemplate:Clone()
+        for _, v in ipairs(flyWindEff:GetDescendants()) do
             if v:IsA("Trail") or v:IsA("ParticleEmitter") then
                 v.Enabled = false
-                wfx[#wfx + 1] = v
+                table.insert(flyWindParts, v)
             end
         end
-        flyWfxList = wfx
-        flyIsFallback = false
-        -- store wnd in folder via ObjectValue so we can destroy it later
-        local ref = Instance.new("ObjectValue")
-        ref.Name  = "WindRef"
-        ref.Value = wnd
-        ref.Parent = flyVFXFolder
-    else
-        flyIsFallback = true
-        local att0 = Instance.new("Attachment")
-        att0.Position = Vector3.new(-0.5, 0, 0)
-        att0.Parent   = rt
-        local att1 = Instance.new("Attachment")
-        att1.Position = Vector3.new(0.5, 0, 0)
-        att1.Parent   = rt
-
-        local trail = Instance.new("Trail")
-        trail.Attachment0 = att0
-        trail.Attachment1 = att1
-        trail.Lifetime    = 0.35
-        trail.MinLength   = 0
-        trail.FaceCamera  = true
-        trail.WidthScale  = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 1.2),
-            NumberSequenceKeypoint.new(0.5, 0.6),
-            NumberSequenceKeypoint.new(1, 0),
-        })
-        trail.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(200, 160, 255)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(100, 60, 220)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 10, 100)),
-        })
-        trail.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 0.1),
-            NumberSequenceKeypoint.new(0.6, 0.4),
-            NumberSequenceKeypoint.new(1, 1),
-        })
-        trail.Parent = rt
-
-        local pAtt = Instance.new("Attachment")
-        pAtt.Parent = rt
-        local pe = Instance.new("ParticleEmitter")
-        pe.Texture       = "rbxassetid://6101261905"
-        pe.LightEmission = 0.9
-        pe.Speed         = NumberRange.new(5, 14)
-        pe.Rate          = 30
-        pe.Lifetime      = NumberRange.new(0.2, 0.55)
-        pe.SpreadAngle   = Vector2.new(35, 35)
-        pe.Enabled       = false
-        pe.Parent        = pAtt
-
-        local pl = Instance.new("PointLight")
-        pl.Brightness = 3
-        pl.Range      = 14
-        pl.Color      = Color3.fromRGB(160, 100, 255)
-        pl.Parent     = rt
-
-        task.spawn(function()
-            local hue = 0
-            while flyOn do
-                hue = (hue + 0.025) % 1
-                TweenService:Create(pl, TweenInfo.new(0.25, Enum.EasingStyle.Sine), {
-                    Brightness = 3 + math.sin(hue * math.pi * 2),
-                    Range      = 13 + math.sin(hue * math.pi) * 3,
-                    Color      = Color3.fromHSV(hue, 0.7, 1),
-                }):Play()
-                task.wait(0.25)
-            end
-            pcall(function() pl:Destroy() end)
-        end)
-
-        flyWfxList = {trail, pe}
+        flyWindEff.Parent = workspace.CurrentCamera
     end
 
-    -- sound
-    local soundSrc = RS:FindFirstChild("Sounds")
-        and RS.Sounds:FindFirstChild("Megumi")
-        and RS.Sounds.Megumi:FindFirstChild("Serpent")
-        and RS.Sounds.Megumi.Serpent:FindFirstChild("Fly")
-    if soundSrc then
-        flySfx = soundSrc:Clone()
-        flySfx.Looped = true
-        flySfx.Volume = 0
-        flySfx.Parent = rt
-        flySfx:Play()
+    if flyLoopSound then
+        flySoundInst = flyLoopSound:Clone()
+        flySoundInst.Looped  = true
+        flySoundInst.Volume  = 0
+        flySoundInst.Parent  = hrp
+        flySoundInst:Play()
     end
 
-    local boomSrc = RS:FindFirstChild("Sounds")
-        and RS.Sounds:FindFirstChild("Naoya")
-        and RS.Sounds.Naoya:FindFirstChild("TopSpeed")
-        and RS.Sounds.Naoya.TopSpeed:FindFirstChild("SonicBoom")
+    flyFov0 = workspace.CurrentCamera.FieldOfView
 
-    flyDconn = h.Died:Once(flyStop)
+    hum.Died:Connect(function() flyStop() end)
 
-    flyConn = RunService.RenderStepped:Connect(function()
-        if not flyOn then flyStop(); return end
-        if not rt or not rt.Parent then flyStop(); return end
+    flyRunConn = UserInputService.InputBegan:Connect(function(input, gp)
+        if gp or not Fly.active then return end
+        if input.KeyCode == Enum.KeyCode.LeftControl then Fly.boost = true end
+        if input.KeyCode == Enum.KeyCode.LeftAlt     then Fly.slow  = true end
+    end)
+    UserInputService.InputEnded:Connect(function(input, gp)
+        if gp or not Fly.active then return end
+        if input.KeyCode == Enum.KeyCode.LeftControl then Fly.boost = false end
+        if input.KeyCode == Enum.KeyCode.LeftAlt     then Fly.slow  = false end
+    end)
 
+    flyRenderConn = RunService.RenderStepped:Connect(function()
+        if not Fly.active then flyStop(); return end
+        if not hrp.Parent or not hum.Parent then flyStop(); return end
+
+        local mv = hum.MoveDirection
+        local cam = workspace.CurrentCamera
         local cf  = cam.CFrame
-        local mv  = flyMoveVec()
         local dir = cf.LookVector * -mv.Z + cf.RightVector * mv.X
         local mag = dir.Magnitude
-        local fast = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
-        local slow = not fast and UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt)
-        local spd  = fast and FLY_BOOST_SPD or (slow and FLY_SLOW_SPD or FLY_SPEED)
 
-        if fast and mag > 0 then
-            if not flyBoomed and boomSrc then
-                local b = boomSrc:Clone()
-                b.Volume = 0.5
-                b.Parent = rt
-                b:Play()
-                game:GetService("Debris"):AddItem(b, 3)
-            end
-            flyBoomed = true
+        local fast = Fly.boost or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+        local slow = not fast and (Fly.slow or UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt))
+        local spd  = fast and Fly.boostSpeed or (slow and Fly.slowSpeed or Fly.speed)
+
+        if fast and mag > 0 and flySonicBoomSound and not flyBoomInst then
+            flyBoomInst = flySonicBoomSound:Clone()
+            flyBoomInst.Volume = 0.5
+            flyBoomInst.Parent = hrp
+            flyBoomInst:Play()
+            game:GetService("Debris"):AddItem(flyBoomInst, 3)
         elseif not fast then
-            flyBoomed = false
+            flyBoomInst = nil
         end
 
         if mag > 0 then
             local u = dir / mag
-            flyBV.Velocity = flyLerp(flyBV.Velocity, u * spd, 0.12)
+            flyBV.Velocity = flyBV.Velocity:Lerp(u * spd, 0.12)
             flyBG.CFrame   = flyBG.CFrame:Lerp(
                 CFrame.new(Vector3.zero, u) * CFrame.Angles(0, 0, math.rad(-cf.RightVector:Dot(u) * 35)),
                 0.1
             )
-            pcall(function() if flyIdl and flyIdl.IsPlaying then flyIdl:Stop(0.3) end end)
+            pcall(function() if flyTrackHover and flyTrackHover.IsPlaying then flyTrackHover:Stop(0.3) end end)
             pcall(function()
-                if flyTrk then
-                    if not flyTrk.IsPlaying then flyTrk:Play(0.3) end
-                    flyTrk.TimePosition = 0.67
-                    flyTrk:AdjustSpeed(0)
+                if flyTrackRush then
+                    if not flyTrackRush.IsPlaying then flyTrackRush:Play(0.3) end
+                    flyTrackRush.TimePosition = 0.67
+                    flyTrackRush:AdjustSpeed(0)
                 end
             end)
-            if not flyWfxOn then
-                for _, v in ipairs(flyWfxList) do
-                    pcall(function()
-                        if v:IsA("ParticleEmitter") then v.Enabled = true end
-                        if v:IsA("Trail") then v.Enabled = true end
-                    end)
+            if flyWindEff then
+                flyWindEff.CFrame = CFrame.new(hrp.Position, hrp.Position + flyBV.Velocity)
+                for _, v in pairs(flyWindParts) do
+                    if v and v.Parent then v.Enabled = true end
                 end
-                flyWfxOn = true
             end
-            if flySfx then
-                pcall(function()
-                    flySfx.Volume        = flyLerp(flySfx.Volume, fast and 1.5 or 0.8, 0.1)
-                    flySfx.PlaybackSpeed = flyLerp(flySfx.PlaybackSpeed, fast and 1.2 or 0.9, 0.1)
-                end)
+            if flySoundInst then
+                flySoundInst.Volume        = math.min(1.5, flySoundInst.Volume + 0.05)
+                flySoundInst.PlaybackSpeed = math.min(1.2, flySoundInst.PlaybackSpeed + 0.02)
             end
         else
-            flyBV.Velocity = flyLerp(flyBV.Velocity, Vector3.zero, 0.1)
+            flyBV.Velocity = flyBV.Velocity:Lerp(Vector3.zero, 0.1)
             local lv = cf.LookVector
             flyBG.CFrame = flyBG.CFrame:Lerp(
                 CFrame.new(Vector3.zero, Vector3.new(lv.X, 0, lv.Z)),
                 0.06
             )
-            pcall(function() if flyTrk and flyTrk.IsPlaying then flyTrk:Stop(0.3) end end)
-            pcall(function() if flyIdl and not flyIdl.IsPlaying then flyIdl:Play(0.3) end end)
-            if flyWfxOn then
-                for _, v in ipairs(flyWfxList) do
-                    pcall(function()
-                        if v:IsA("ParticleEmitter") then v.Enabled = false end
-                    end)
+            pcall(function() if flyTrackRush  and flyTrackRush.IsPlaying  then flyTrackRush:Stop(0.3)  end end)
+            pcall(function() if flyTrackHover and not flyTrackHover.IsPlaying then flyTrackHover:Play(0.3) end end)
+            if flyWindEff then
+                for _, v in pairs(flyWindParts) do
+                    if v and v.Parent then v.Enabled = false end
                 end
-                flyWfxOn = false
             end
-            if flySfx then
-                pcall(function() flySfx.Volume = flyLerp(flySfx.Volume, 0, 0.1) end)
+            if flySoundInst then
+                flySoundInst.Volume        = math.max(0,   flySoundInst.Volume - 0.05)
+                flySoundInst.PlaybackSpeed = math.max(0.9, flySoundInst.PlaybackSpeed - 0.01)
             end
         end
 
         pcall(function()
-            cam.FieldOfView = flyLerp(
-                cam.FieldOfView,
-                flyFov0 + FLY_FOV_KICK * (flyBV.Velocity.Magnitude / 400),
-                0.08
-            )
+            local cam2 = workspace.CurrentCamera
+            local tFov = flyFov0 + Fly.fovKick * (flyBV.Velocity.Magnitude / 400)
+            cam2.FieldOfView = cam2.FieldOfView + (tFov - cam2.FieldOfView) * 0.08
         end)
     end)
 end
 
 LocalPlayer.CharacterAdded:Connect(function()
     flyStop()
-    if flyWant then
-        task.wait(1)
-        flyStart()
-    end
+    if Fly.want then task.wait(1); flyStart() end
 end)
-LocalPlayer.CharacterRemoving:Connect(flyStop)
 
 makeToggle(mainS, "Fly", false, function(state)
-    flyWant = state
+    Fly.want = state
     if state then flyStart() else flyStop() end
 end)
 
 makeSlider(mainS, "Fly Speed", 20, 400, 180, function(v)
-    FLY_SPEED = v
+    Fly.speed = v
 end)
 
 makeSlider(mainS, "Fly Boost Speed", 50, 800, 400, function(v)
-    FLY_BOOST_SPD = v
+    Fly.boostSpeed = v
 end)
 
 makeSlider(mainS, "Fly Slow Speed", 5, 200, 80, function(v)
-    FLY_SLOW_SPD = v
+    Fly.slowSpeed = v
 end)
 
 makeSlider(mainS, "Fly FOV Kick", 0, 60, 35, function(v)
-    FLY_FOV_KICK = v
+    Fly.fovKick = v
 end)
+
 
 makeToggle(mainS, "Fullbright", false, function(state)
     game:GetService("Lighting").Brightness = state and 5 or 1
@@ -2251,7 +2162,7 @@ local function stopM1Assist()
     for _, conn in ipairs(autoM1Connections) do
         pcall(conn.Disconnect, conn)
     end
-    table.clear(autoM1Connections)
+    for k in next, autoM1Connections do autoM1Connections[k] = nil end
     comboCount = 0
 end
 
@@ -2426,7 +2337,7 @@ makeToggle(autoS, "Perfect Swap", true, function(state)
         for _, conn in ipairs(perfectSwapConnections) do
             pcall(conn.Disconnect, conn)
         end
-        table.clear(perfectSwapConnections)
+        for k in next, perfectSwapConnections do perfectSwapConnections[k] = nil end
         perfectSwapEventConn = nil
         perfectSwapCharConn = nil
     end
@@ -2529,10 +2440,10 @@ local MAX_Y = 1000
 local function scanItems()
     local found = {}
     for _, obj in ipairs(workspace:GetDescendants()) do
-        local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt")
+        local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
         if not prompt then
             for _, child in ipairs(obj:GetChildren()) do
-                prompt = child:FindFirstChildWhichIsA("ProximityPrompt")
+                prompt = child:FindFirstChildOfClass("ProximityPrompt")
                 if prompt then break end
             end
         end
@@ -2545,7 +2456,7 @@ local function scanItems()
                     local pos = container.Position
                     if pos.Y < MIN_Y or pos.Y > MAX_Y then valid = false end
                 else
-                    local part = container:FindFirstChildWhichIsA("BasePart")
+                    local part = container:FindFirstChildOfClass("BasePart")
                     if part then
                         local pos = part.Position
                         if pos.Y < MIN_Y or pos.Y > MAX_Y then valid = false end
@@ -2565,7 +2476,7 @@ end
 local function findItem(itemName)
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj.Name == itemName then
-            local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt")
+            local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
             if prompt and prompt.Enabled then
                 local targetPart = nil
                 if prompt.Parent:IsA("BasePart") then
@@ -2723,7 +2634,11 @@ makeButton(extraS, "Rejoin Server", function()
     game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
 end)
 makeButton(extraS, "Copy Server ID", function()
-    setclipboard(game.JobId)
+    if setclipboard then
+        setclipboard(game.JobId)
+    elseif toclipboard then
+        toclipboard(game.JobId)
+    end
 end)
 
 -- ==========================================
