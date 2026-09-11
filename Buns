@@ -2391,6 +2391,177 @@ makeToggle(autoS, "Perfect Swap", true, function(state)
     end
 end)
 
+-- ── BOOGIE WOOGIE (Todo Swap) ─────────────────────────────────
+-- Ported from BoogieWoogieGUI — fires RightActivated on two
+-- characters so the TodoService swaps them.
+
+local boogieWoogieActive  = false
+local MAX_BOOGIE_DISTANCE = 200
+local MIN_BOOGIE_DOT      = 0.25
+local BOOGIE_RELEASE_DELAY = 0.3
+local BOOGIE_COOLDOWN      = 2
+local boogieSwapping       = false
+local boogieCharactersFolder = workspace:WaitForChild("Characters")
+
+-- "Swap Mode" cycles: Nearest → Random → Furthest
+local BOOGIE_SWAP_MODES = {"Nearest", "Random", "Furthest"}
+local boogieSwapModeIndex = 1  -- default: Nearest
+
+local todoRemotesBoogie        = RS:WaitForChild("Knit")
+    :WaitForChild("Knit")
+    :WaitForChild("Services")
+    :WaitForChild("TodoService")
+    :WaitForChild("RE")
+local boogieRightActivated = todoRemotesBoogie:WaitForChild("RightActivated")
+local boogieActivated      = todoRemotesBoogie:WaitForChild("Activated")
+
+local function boogieFire(charA, charB)
+    if boogieSwapping then return end
+    boogieSwapping = true
+    pcall(function() boogieRightActivated:FireServer(charA) end)
+    pcall(function() boogieRightActivated:FireServer(charB) end)
+    task.delay(BOOGIE_RELEASE_DELAY, function()
+        pcall(function() boogieActivated:FireServer(false) end)
+    end)
+    task.delay(BOOGIE_COOLDOWN, function()
+        boogieSwapping = false
+    end)
+end
+
+local function getBoogieCandidates()
+    local candidates = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(candidates, player)
+        end
+    end
+    local dummy = boogieCharactersFolder:FindFirstChild("Dummy")
+    if dummy then
+        table.insert(candidates, dummy)
+    end
+    return candidates
+end
+
+local function getCharForEntity(entity)
+    if entity:IsA("Player") then
+        return entity.Character
+    elseif entity:IsA("Model") then
+        return entity
+    end
+    return nil
+end
+
+local function pickBoogieTarget()
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local myLook = myRoot.CFrame.LookVector
+
+    local candidates = getBoogieCandidates()
+    local mode = BOOGIE_SWAP_MODES[boogieSwapModeIndex]
+
+    -- Build valid list (within distance + FOV cone)
+    local valid = {}
+    for _, entity in ipairs(candidates) do
+        local char = getCharForEntity(entity)
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local offset = root.Position - myRoot.Position
+            local dist   = offset.Magnitude
+            if dist > 0 and dist <= MAX_BOOGIE_DISTANCE then
+                if myLook:Dot(offset.Unit) > MIN_BOOGIE_DOT then
+                    table.insert(valid, {entity = entity, dist = dist})
+                end
+            end
+        end
+    end
+    if #valid == 0 then return nil end
+
+    if mode == "Nearest" then
+        table.sort(valid, function(a, b) return a.dist < b.dist end)
+        return valid[1].entity
+    elseif mode == "Furthest" then
+        table.sort(valid, function(a, b) return a.dist > b.dist end)
+        return valid[1].entity
+    else -- Random
+        return valid[math.random(1, #valid)].entity
+    end
+end
+
+-- Mode-cycle button label
+local swapModeBtn  -- forward declare so the label updater can reference it
+
+local function updateBoogieModeLabel()
+    if swapModeBtn then
+        swapModeBtn.Text = "Swap Mode: " .. BOOGIE_SWAP_MODES[boogieSwapModeIndex]
+    end
+end
+
+-- Main Boogie Woogie toggle
+makeToggle(autoS, "Boogie Woogie Swap", false, function(state)
+    boogieWoogieActive = state
+end)
+
+-- Swap-Mode cycle button (Nearest / Random / Furthest)
+do
+    local row = Instance.new("Frame")
+    row.Size             = UDim2.new(1, -4, 0, 32)
+    row.BackgroundColor3 = C.row
+    row.BorderSizePixel  = 0
+    row.ZIndex           = 100
+    row.Parent           = autoS
+    makeCorner(row, 6)
+    makeStroke(row, C.stroke, 1, 0.5)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size                 = UDim2.new(0.4, 0, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text                 = "Target Mode"
+    lbl.TextColor3           = C.text
+    lbl.Font                 = Enum.Font.Gotham
+    lbl.TextSize             = 11
+    lbl.TextXAlignment       = Enum.TextXAlignment.Left
+    lbl.Position             = UDim2.new(0, 8, 0, 0)
+    lbl.ZIndex               = 101
+    lbl.Parent               = row
+
+    swapModeBtn = Instance.new("TextButton")
+    swapModeBtn.Size             = UDim2.new(0.55, 0, 0, 22)
+    swapModeBtn.Position         = UDim2.new(0.43, 0, 0.5, -11)
+    swapModeBtn.BackgroundColor3 = C.accent2
+    swapModeBtn.TextColor3       = C.white
+    swapModeBtn.Font             = Enum.Font.GothamBold
+    swapModeBtn.TextSize         = 11
+    swapModeBtn.BorderSizePixel  = 0
+    swapModeBtn.ZIndex           = 102
+    swapModeBtn.Parent           = row
+    makeCorner(swapModeBtn, 5)
+    makeStroke(swapModeBtn, C.accentHi, 1)
+    updateBoogieModeLabel()
+
+    swapModeBtn.MouseButton1Click:Connect(function()
+        boogieSwapModeIndex = (boogieSwapModeIndex % #BOOGIE_SWAP_MODES) + 1
+        updateBoogieModeLabel()
+    end)
+end
+
+-- Fire Boogie Woogie swap on demand (call from combat logic or a keybind)
+local function doBoogieSwap()
+    if not boogieWoogieActive then return end
+    if boogieSwapping then return end
+    local myChar = LocalPlayer.Character
+    if not myChar then return end
+    local picked = pickBoogieTarget()
+    if not picked then return end
+    local targetChar = getCharForEntity(picked)
+    if not targetChar then return end
+    boogieFire(myChar, targetChar)
+end
+
+-- Expose so other parts of the script can call doBoogieSwap()
+_G.DoBoogieSwap = doBoogieSwap
+
 -- AUTO GARUDA REBOUND
 makeSectionRow(autoS, "Garuda")
 
