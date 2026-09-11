@@ -8,7 +8,6 @@ local RS                = game:GetService("ReplicatedStorage")
 local ReplicatedStorage = RS
 local LocalPlayer       = Players.LocalPlayer
 
--- ── COLOURS ──────────────────────────────────────────────────
 local C = {
     bg        = Color3.fromRGB(8,   5,  18),
     panel     = Color3.fromRGB(13,  9,  26),
@@ -31,7 +30,6 @@ local C = {
     darkPurple = Color3.fromRGB(80, 20, 80),
 }
 
--- ── SCREEN GUI ───────────────────────────────────────────────
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name            = "KZM"
 screenGui.ResetOnSpawn    = false
@@ -39,7 +37,6 @@ screenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder    = 200
 screenGui.Parent          = LocalPlayer.PlayerGui
 
--- ── HELPERS ──────────────────────────────────────────────────
 local function makeCorner(p, r)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, r or 8)
@@ -56,14 +53,12 @@ local function makeStroke(p, col, th, tr)
     return s
 end
 
--- ── WINDOW SIZES ─────────────────────────────────────────────
 local WIN_W  = 700
 local WIN_H  = 420
 local TITLE_H = 42
 local TAB_H   = 32
 local HEADER_H = TITLE_H + TAB_H + 2
 
--- ── TOGGLE BUTTON ────────────────────────────────────────────
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size              = UDim2.new(0, 80, 0, 30)
 toggleBtn.Position          = UDim2.new(0, 10, 0, 60)
@@ -89,7 +84,6 @@ task.spawn(function()
     end
 end)
 
--- ── MAIN WINDOW ──────────────────────────────────────────────
 local window = Instance.new("Frame")
 window.Name             = "KZMWindow"
 window.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
@@ -134,7 +128,6 @@ winGrad.Color = ColorSequence.new({
 })
 winGrad.Parent = window
 
--- ── OPEN/CLOSE ANIMATION ─────────────────────────────────────
 local isOpen = false
 local OPEN_POS  = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2 + 30)
 local START_POS = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2 + 80)
@@ -173,7 +166,6 @@ toggleBtn.MouseButton1Click:Connect(function()
     if isOpen then closeGUI() else openGUI() end
 end)
 
--- ── TITLE BAR ────────────────────────────────────────────────
 local titleBar = Instance.new("Frame")
 titleBar.Name             = "TitleBar"
 titleBar.Size             = UDim2.new(1, 0, 0, TITLE_H)
@@ -295,7 +287,6 @@ titleBar.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
--- ── TAB BAR ──────────────────────────────────────────────────
 local tabBar = Instance.new("Frame")
 tabBar.Name             = "TabBar"
 tabBar.Size             = UDim2.new(1, 0, 0, TAB_H)
@@ -328,7 +319,6 @@ tabSep.BorderSizePixel  = 0
 tabSep.ZIndex           = 108
 tabSep.Parent           = window
 
--- ── CONTENT AREA ─────────────────────────────────────────────
 local contentFrame = Instance.new("Frame")
 contentFrame.Name             = "Content"
 contentFrame.Size             = UDim2.new(1, 0, 1, -HEADER_H)
@@ -338,7 +328,6 @@ contentFrame.BorderSizePixel  = 0
 contentFrame.ZIndex           = 100
 contentFrame.Parent           = window
 
--- ── UI HELPERS ─────────────────────────────────────────────────────
 local function makeScrollList(parent)
     local sf = Instance.new("ScrollingFrame")
     sf.Size                    = UDim2.new(1, 0, 1, 0)
@@ -745,7 +734,6 @@ local function makeDropdown(parent, labelText, items, default, callback)
     return row, updateList, function() return selectedItem end
 end
 
--- ── TABS ─────────────────────────────────────────────────────
 local tabs = {}
 local tabFrames = {}
 local tabNames = {"Main", "Combat", "Auto", "Target", "Extra", "Configs"}
@@ -795,7 +783,6 @@ for _, name in ipairs(tabNames) do
     scrolls[name] = makeScrollList(tabFrames[name])
 end
 
--- ── PREMIUM LOCK-ON BUTTON (SMOOTH animations) ─────────────
 local LOFrame = Instance.new("Frame")
 LOFrame.Name                  = "LockOnBtn"
 LOFrame.Size                  = UDim2.new(0, 88, 0, 88)
@@ -907,7 +894,6 @@ local lockOnBtn = Instance.new("TextButton")
 lockOnBtn.Size = UDim2.new(1,0,1,0); lockOnBtn.BackgroundTransparency = 1
 lockOnBtn.Text = ""; lockOnBtn.ZIndex = 206; lockOnBtn.Parent = LOFrame
 
--- ── ANIMATION LOOPS ─────────────────────────────────────────
 local spinAngle = 0
 local ringRotating = RunService.Heartbeat:Connect(function(dt)
     if not LOFrame.Visible then return end
@@ -961,7 +947,6 @@ local outerLoop = task.spawn(function()
     end
 end)
 
--- ── DRAG ─────────────────────────────────────────────────────
 local loDrag, loDS, loSP
 lockOnBtn.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
@@ -980,7 +965,6 @@ lockOnBtn.InputEnded:Connect(function(i)
     end
 end)
 
--- ── STATE CHANGE FUNCTIONS (theme switching) ──────────────
 local lockRingStroke = innerGlow
 
 local function setLockedTheme()
@@ -1008,9 +992,7 @@ end
 switchTab("Main")
 openGUI()
 
--- ==========================================
 -- TARGETING: Crosshair-based (Players + Dummy NPC only)
--- ==========================================
 local function getNearestTarget()
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
@@ -1054,9 +1036,7 @@ local function getNearestTarget()
     return bestResult
 end
 
--- ==========================================
 -- INSTANT RESPAWN LOGIC (from standalone)
--- ==========================================
 local hasHookMetamethod = type(hookmetamethod) == "function"
 local hasCheckcaller = type(checkcaller) == "function"
 local hasNewcclosure = type(newcclosure) == "function"
@@ -1184,9 +1164,7 @@ local function instantRespawnNow()
     end)
 end
 
--- ==========================================
 -- MAIN TAB
--- ==========================================
 local mainS = scrolls["Main"]
 
 makeSectionRow(mainS, "Movement")
@@ -1207,10 +1185,8 @@ makeToggle(mainS, "No Parkour Cooldown", true, function(state)
     end
 end)
 
--- ==========================================
 -- FLY FEATURE (Mobile only — full 3D camera-driven)
 -- Thumbstick forward = fly exactly where camera points (up/down/sideways)
--- ==========================================
 local FLY_SPEED    = 50
 local flyActive    = false
 local flyConn      = nil
@@ -1675,9 +1651,7 @@ makeToggle(mainS, "Expand Hitbox", false, function(state)
     end
 end)
 
--- ==========================================
 -- COMBAT TAB
--- ==========================================
 local combatS = scrolls["Combat"]
 
 makeSectionRow(combatS, "Blackflash")
@@ -1710,7 +1684,6 @@ makeToggle(combatS, "Yuji 100% Blackflash", true, function(state)
     end
 end)
 
--- ── RESPAWN SECTION ──
 makeSectionRow(combatS, "Respawn")
 
 -- Force Reset: now silent (no notification)
@@ -1725,9 +1698,7 @@ makeButton(combatS, "1HP", function()
     end)
 end, C.red)
 
--- ==========================================
 -- TARGET TAB (TBO-style TP system, no emojis)
--- ==========================================
 local targetTab = scrolls["Target"]
 
 -- Shared functions
@@ -1815,7 +1786,6 @@ makeToggle(targetTab, "TP Bypass", false, function(state)
     if state then antistuff() else unantistuff() end
 end)
 
--- ── Player Selection Panel ──
 local panelOpen = false
 local selectedPlayer = nil
 local playerPanel = Instance.new("Frame")
@@ -1913,7 +1883,6 @@ panelClose.MouseButton1Click:Connect(function()
     playerPanel.Visible = false
 end)
 
--- ── TP functions ──
 local function setTeleportStatus(msg, color)
     local statusRow = targetTab:FindFirstChild("StatusRow")
     if statusRow then
@@ -2088,7 +2057,6 @@ makeButton(targetTab, "Select Target", function()
     if panelOpen then updatePlayerList() end
 end)
 
--- ── SPECTATE FEATURE ──
 makeSectionRow(targetTab, "Spectate")
 
 local spectatePlayer = nil
@@ -2145,9 +2113,7 @@ local spectateToggleRow, setSpectateToggle, getSpectateToggle = makeToggle(targe
     end
 end)
 
--- ==========================================
 -- AUTO TAB (unchanged)
--- ==========================================
 local autoS = scrolls["Auto"]
 
 makeSectionRow(autoS, "M1 Assist")
@@ -2391,176 +2357,15 @@ makeToggle(autoS, "Perfect Swap", true, function(state)
     end
 end)
 
--- ── BOOGIE WOOGIE (Todo Swap) ─────────────────────────────────
--- Ported from BoogieWoogieGUI — fires RightActivated on two
--- characters so the TodoService swaps them.
-
-local boogieWoogieActive  = false
-local MAX_BOOGIE_DISTANCE = 200
-local MIN_BOOGIE_DOT      = 0.25
-local BOOGIE_RELEASE_DELAY = 0.3
-local BOOGIE_COOLDOWN      = 2
-local boogieSwapping       = false
-local boogieCharactersFolder = workspace:WaitForChild("Characters")
-
--- "Swap Mode" cycles: Nearest → Random → Furthest
-local BOOGIE_SWAP_MODES = {"Nearest", "Random", "Furthest"}
-local boogieSwapModeIndex = 1  -- default: Nearest
-
-local todoRemotesBoogie        = RS:WaitForChild("Knit")
-    :WaitForChild("Knit")
-    :WaitForChild("Services")
-    :WaitForChild("TodoService")
-    :WaitForChild("RE")
-local boogieRightActivated = todoRemotesBoogie:WaitForChild("RightActivated")
-local boogieActivated      = todoRemotesBoogie:WaitForChild("Activated")
-
-local function boogieFire(charA, charB)
-    if boogieSwapping then return end
-    boogieSwapping = true
-    pcall(function() boogieRightActivated:FireServer(charA) end)
-    pcall(function() boogieRightActivated:FireServer(charB) end)
-    task.delay(BOOGIE_RELEASE_DELAY, function()
-        pcall(function() boogieActivated:FireServer(false) end)
-    end)
-    task.delay(BOOGIE_COOLDOWN, function()
-        boogieSwapping = false
-    end)
-end
-
-local function getBoogieCandidates()
-    local candidates = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            table.insert(candidates, player)
-        end
-    end
-    local dummy = boogieCharactersFolder:FindFirstChild("Dummy")
-    if dummy then
-        table.insert(candidates, dummy)
-    end
-    return candidates
-end
-
-local function getCharForEntity(entity)
-    if entity:IsA("Player") then
-        return entity.Character
-    elseif entity:IsA("Model") then
-        return entity
-    end
-    return nil
-end
-
-local function pickBoogieTarget()
-    local myChar = LocalPlayer.Character
-    if not myChar then return nil end
-    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil end
-    local myLook = myRoot.CFrame.LookVector
-
-    local candidates = getBoogieCandidates()
-    local mode = BOOGIE_SWAP_MODES[boogieSwapModeIndex]
-
-    -- Build valid list (within distance + FOV cone)
-    local valid = {}
-    for _, entity in ipairs(candidates) do
-        local char = getCharForEntity(entity)
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        if root then
-            local offset = root.Position - myRoot.Position
-            local dist   = offset.Magnitude
-            if dist > 0 and dist <= MAX_BOOGIE_DISTANCE then
-                if myLook:Dot(offset.Unit) > MIN_BOOGIE_DOT then
-                    table.insert(valid, {entity = entity, dist = dist})
-                end
-            end
-        end
-    end
-    if #valid == 0 then return nil end
-
-    if mode == "Nearest" then
-        table.sort(valid, function(a, b) return a.dist < b.dist end)
-        return valid[1].entity
-    elseif mode == "Furthest" then
-        table.sort(valid, function(a, b) return a.dist > b.dist end)
-        return valid[1].entity
-    else -- Random
-        return valid[math.random(1, #valid)].entity
-    end
-end
-
--- Mode-cycle button label
-local swapModeBtn  -- forward declare so the label updater can reference it
-
-local function updateBoogieModeLabel()
-    if swapModeBtn then
-        swapModeBtn.Text = "Swap Mode: " .. BOOGIE_SWAP_MODES[boogieSwapModeIndex]
-    end
-end
-
--- Main Boogie Woogie toggle
-makeToggle(autoS, "Boogie Woogie Swap", false, function(state)
-    boogieWoogieActive = state
-end)
-
--- Swap-Mode cycle button (Nearest / Random / Furthest)
-do
-    local row = Instance.new("Frame")
-    row.Size             = UDim2.new(1, -4, 0, 32)
-    row.BackgroundColor3 = C.row
-    row.BorderSizePixel  = 0
-    row.ZIndex           = 100
-    row.Parent           = autoS
-    makeCorner(row, 6)
-    makeStroke(row, C.stroke, 1, 0.5)
-
-    local lbl = Instance.new("TextLabel")
-    lbl.Size                 = UDim2.new(0.4, 0, 1, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text                 = "Target Mode"
-    lbl.TextColor3           = C.text
-    lbl.Font                 = Enum.Font.Gotham
-    lbl.TextSize             = 11
-    lbl.TextXAlignment       = Enum.TextXAlignment.Left
-    lbl.Position             = UDim2.new(0, 8, 0, 0)
-    lbl.ZIndex               = 101
-    lbl.Parent               = row
-
-    swapModeBtn = Instance.new("TextButton")
-    swapModeBtn.Size             = UDim2.new(0.55, 0, 0, 22)
-    swapModeBtn.Position         = UDim2.new(0.43, 0, 0.5, -11)
-    swapModeBtn.BackgroundColor3 = C.accent2
-    swapModeBtn.TextColor3       = C.white
-    swapModeBtn.Font             = Enum.Font.GothamBold
-    swapModeBtn.TextSize         = 11
-    swapModeBtn.BorderSizePixel  = 0
-    swapModeBtn.ZIndex           = 102
-    swapModeBtn.Parent           = row
-    makeCorner(swapModeBtn, 5)
-    makeStroke(swapModeBtn, C.accentHi, 1)
-    updateBoogieModeLabel()
-
-    swapModeBtn.MouseButton1Click:Connect(function()
-        boogieSwapModeIndex = (boogieSwapModeIndex % #BOOGIE_SWAP_MODES) + 1
-        updateBoogieModeLabel()
-    end)
-end
-
--- Fire Boogie Woogie swap on demand (call from combat logic or a keybind)
-local function doBoogieSwap()
-    if not boogieWoogieActive then return end
-    if boogieSwapping then return end
-    local myChar = LocalPlayer.Character
-    if not myChar then return end
-    local picked = pickBoogieTarget()
-    if not picked then return end
-    local targetChar = getCharForEntity(picked)
-    if not targetChar then return end
-    boogieFire(myChar, targetChar)
-end
-
--- Expose so other parts of the script can call doBoogieSwap()
-_G.DoBoogieSwap = doBoogieSwap
+local bwOn,bwBusy,bwMode=false,false,1
+local bwModes={"Nearest","Random","Furthest"}
+local function bwFire(a,b) local s=RS.Knit.Knit.Services:FindFirstChild("TodoService") if not s or not s.RE then return end local r=s.RE:FindFirstChild("RightActivated") local v=s.RE:FindFirstChild("Activated") if not r or not v then return end bwBusy=true pcall(function()r:FireServer(a)end) pcall(function()r:FireServer(b)end) task.delay(0.3,function()pcall(function()v:FireServer(false)end)end) task.delay(2,function()bwBusy=false end) end
+local function bwChar(e) if e:IsA("Player") then return e.Character elseif e:IsA("Model") then return e end end
+local function bwPick() local mc=LocalPlayer.Character if not mc then return end local mr=mc:FindFirstChild("HumanoidRootPart") if not mr then return end local ml=mr.CFrame.LookVector local pool={} for _,p in ipairs(Players:GetPlayers()) do if p~=LocalPlayer then pool[#pool+1]=p end end local cf=workspace:FindFirstChild("Characters") local d=cf and cf:FindFirstChild("Dummy") if d then pool[#pool+1]=d end local v={} for _,e in ipairs(pool) do local c=bwChar(e) local r=c and c:FindFirstChild("HumanoidRootPart") if r then local o=r.Position-mr.Position local dist=o.Magnitude if dist>0 and dist<=200 and ml:Dot(o.Unit)>0.25 then v[#v+1]={e=e,d=dist} end end end if #v==0 then return end if bwMode==1 then table.sort(v,function(a,b)return a.d<b.d end) return v[1].e elseif bwMode==3 then table.sort(v,function(a,b)return a.d>b.d end) return v[1].e else return v[math.random(1,#v)].e end end
+makeToggle(autoS,"Boogie Woogie",false,function(s)bwOn=s end)
+local bwBtn
+bwBtn=makeButton(autoS,"Swap Mode: Nearest",function() bwMode=bwMode%#bwModes+1 bwBtn.Text="Swap Mode: "..bwModes[bwMode] end)
+makeButton(autoS,"Boogie Swap Now",function() if not bwOn or bwBusy then return end local mc=LocalPlayer.Character if not mc then return end local t=bwPick() if not t then return end local tc=bwChar(t) if not tc then return end bwFire(mc,tc) end)
 
 -- AUTO GARUDA REBOUND
 makeSectionRow(autoS, "Garuda")
@@ -2603,9 +2408,7 @@ makeToggle(autoS, "Auto Garuda Rebound", false, function(state)
     end
 end)
 
--- ==========================================
 -- EXTRA TAB (Emote Unlocker + Item Grabber + Misc)
--- ==========================================
 local extraS = scrolls["Extra"]
 
 makeSectionRow(extraS, "Emotes")
@@ -2856,9 +2659,7 @@ makeButton(extraS, "Copy Server ID", function()
     setclipboard(game.JobId)
 end)
 
--- ==========================================
 -- CONFIGS TAB
--- ==========================================
 local configS = scrolls["Configs"]
 
 makeSectionRow(configS, "UI Settings")
@@ -2888,9 +2689,7 @@ credText.TextXAlignment = Enum.TextXAlignment.Center
 credText.ZIndex = 101
 credText.Parent = credLbl
 
--- ==========================================
 -- RESET ON RESPAWN
--- ==========================================
 LocalPlayer.CharacterAdded:Connect(function()
     tpBypassOn = false
     unantistuff()
