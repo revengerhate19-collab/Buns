@@ -2165,7 +2165,7 @@ local function startM1Assist()
     comboCount = 0
     lastHitTime = 0
 
-    if not autoM1Hook then
+    if not autoM1Hook and type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
         autoM1Hook = hookmetamethod(game, "__namecall", function(self, ...)
             local m = getnamecallmethod()
             local a = {...}
@@ -2759,4 +2759,3 @@ task.defer(function()
 end)
 
 print("KZM v3.1 loaded — Force Reset silent, Emote Unlocker silent, Fly animation improved with dynamic pose and effects.")
-
