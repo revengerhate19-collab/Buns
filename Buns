@@ -8,6 +8,7 @@ local RS                = game:GetService("ReplicatedStorage")
 local ReplicatedStorage = RS
 local LocalPlayer       = Players.LocalPlayer
 
+-- ── COLOURS ──────────────────────────────────────────────────
 local C = {
     bg        = Color3.fromRGB(8,   5,  18),
     panel     = Color3.fromRGB(13,  9,  26),
@@ -30,6 +31,7 @@ local C = {
     darkPurple = Color3.fromRGB(80, 20, 80),
 }
 
+-- ── SCREEN GUI ───────────────────────────────────────────────
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name            = "KZM"
 screenGui.ResetOnSpawn    = false
@@ -37,6 +39,7 @@ screenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder    = 200
 screenGui.Parent          = LocalPlayer.PlayerGui
 
+-- ── HELPERS ──────────────────────────────────────────────────
 local function makeCorner(p, r)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, r or 8)
@@ -53,12 +56,14 @@ local function makeStroke(p, col, th, tr)
     return s
 end
 
+-- ── WINDOW SIZES ─────────────────────────────────────────────
 local WIN_W  = 700
 local WIN_H  = 420
 local TITLE_H = 42
 local TAB_H   = 32
 local HEADER_H = TITLE_H + TAB_H + 2
 
+-- ── TOGGLE BUTTON ────────────────────────────────────────────
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Size              = UDim2.new(0, 80, 0, 30)
 toggleBtn.Position          = UDim2.new(0, 10, 0, 60)
@@ -84,6 +89,7 @@ task.spawn(function()
     end
 end)
 
+-- ── MAIN WINDOW ──────────────────────────────────────────────
 local window = Instance.new("Frame")
 window.Name             = "KZMWindow"
 window.Size             = UDim2.new(0, WIN_W, 0, WIN_H)
@@ -128,6 +134,7 @@ winGrad.Color = ColorSequence.new({
 })
 winGrad.Parent = window
 
+-- ── OPEN/CLOSE ANIMATION ─────────────────────────────────────
 local isOpen = false
 local OPEN_POS  = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2 + 30)
 local START_POS = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2 + 80)
@@ -166,6 +173,7 @@ toggleBtn.MouseButton1Click:Connect(function()
     if isOpen then closeGUI() else openGUI() end
 end)
 
+-- ── TITLE BAR ────────────────────────────────────────────────
 local titleBar = Instance.new("Frame")
 titleBar.Name             = "TitleBar"
 titleBar.Size             = UDim2.new(1, 0, 0, TITLE_H)
@@ -287,6 +295,7 @@ titleBar.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
 end)
 
+-- ── TAB BAR ──────────────────────────────────────────────────
 local tabBar = Instance.new("Frame")
 tabBar.Name             = "TabBar"
 tabBar.Size             = UDim2.new(1, 0, 0, TAB_H)
@@ -319,6 +328,7 @@ tabSep.BorderSizePixel  = 0
 tabSep.ZIndex           = 108
 tabSep.Parent           = window
 
+-- ── CONTENT AREA ─────────────────────────────────────────────
 local contentFrame = Instance.new("Frame")
 contentFrame.Name             = "Content"
 contentFrame.Size             = UDim2.new(1, 0, 1, -HEADER_H)
@@ -328,6 +338,7 @@ contentFrame.BorderSizePixel  = 0
 contentFrame.ZIndex           = 100
 contentFrame.Parent           = window
 
+-- ── UI HELPERS ─────────────────────────────────────────────────────
 local function makeScrollList(parent)
     local sf = Instance.new("ScrollingFrame")
     sf.Size                    = UDim2.new(1, 0, 1, 0)
@@ -734,6 +745,7 @@ local function makeDropdown(parent, labelText, items, default, callback)
     return row, updateList, function() return selectedItem end
 end
 
+-- ── TABS ─────────────────────────────────────────────────────
 local tabs = {}
 local tabFrames = {}
 local tabNames = {"Main", "Combat", "Auto", "Target", "Extra", "Configs"}
@@ -783,6 +795,7 @@ for _, name in ipairs(tabNames) do
     scrolls[name] = makeScrollList(tabFrames[name])
 end
 
+-- ── PREMIUM LOCK-ON BUTTON (SMOOTH animations) ─────────────
 local LOFrame = Instance.new("Frame")
 LOFrame.Name                  = "LockOnBtn"
 LOFrame.Size                  = UDim2.new(0, 88, 0, 88)
@@ -894,6 +907,7 @@ local lockOnBtn = Instance.new("TextButton")
 lockOnBtn.Size = UDim2.new(1,0,1,0); lockOnBtn.BackgroundTransparency = 1
 lockOnBtn.Text = ""; lockOnBtn.ZIndex = 206; lockOnBtn.Parent = LOFrame
 
+-- ── ANIMATION LOOPS ─────────────────────────────────────────
 local spinAngle = 0
 local ringRotating = RunService.Heartbeat:Connect(function(dt)
     if not LOFrame.Visible then return end
@@ -947,6 +961,7 @@ local outerLoop = task.spawn(function()
     end
 end)
 
+-- ── DRAG ─────────────────────────────────────────────────────
 local loDrag, loDS, loSP
 lockOnBtn.InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
@@ -965,6 +980,7 @@ lockOnBtn.InputEnded:Connect(function(i)
     end
 end)
 
+-- ── STATE CHANGE FUNCTIONS (theme switching) ──────────────
 local lockRingStroke = innerGlow
 
 local function setLockedTheme()
@@ -992,7 +1008,9 @@ end
 switchTab("Main")
 openGUI()
 
+-- ==========================================
 -- TARGETING: Crosshair-based (Players + Dummy NPC only)
+-- ==========================================
 local function getNearestTarget()
     local myChar = LocalPlayer.Character
     if not myChar then return nil end
@@ -1036,7 +1054,9 @@ local function getNearestTarget()
     return bestResult
 end
 
+-- ==========================================
 -- INSTANT RESPAWN LOGIC (from standalone)
+-- ==========================================
 local hasHookMetamethod = type(hookmetamethod) == "function"
 local hasCheckcaller = type(checkcaller) == "function"
 local hasNewcclosure = type(newcclosure) == "function"
@@ -1164,7 +1184,9 @@ local function instantRespawnNow()
     end)
 end
 
+-- ==========================================
 -- MAIN TAB
+-- ==========================================
 local mainS = scrolls["Main"]
 
 makeSectionRow(mainS, "Movement")
@@ -1185,8 +1207,10 @@ makeToggle(mainS, "No Parkour Cooldown", true, function(state)
     end
 end)
 
+-- ==========================================
 -- FLY FEATURE (Mobile only — full 3D camera-driven)
 -- Thumbstick forward = fly exactly where camera points (up/down/sideways)
+-- ==========================================
 local FLY_SPEED    = 50
 local flyActive    = false
 local flyConn      = nil
@@ -1651,7 +1675,9 @@ makeToggle(mainS, "Expand Hitbox", false, function(state)
     end
 end)
 
+-- ==========================================
 -- COMBAT TAB
+-- ==========================================
 local combatS = scrolls["Combat"]
 
 makeSectionRow(combatS, "Blackflash")
@@ -1684,6 +1710,7 @@ makeToggle(combatS, "Yuji 100% Blackflash", true, function(state)
     end
 end)
 
+-- ── RESPAWN SECTION ──
 makeSectionRow(combatS, "Respawn")
 
 -- Force Reset: now silent (no notification)
@@ -1698,7 +1725,9 @@ makeButton(combatS, "1HP", function()
     end)
 end, C.red)
 
+-- ==========================================
 -- TARGET TAB (TBO-style TP system, no emojis)
+-- ==========================================
 local targetTab = scrolls["Target"]
 
 -- Shared functions
@@ -1786,6 +1815,7 @@ makeToggle(targetTab, "TP Bypass", false, function(state)
     if state then antistuff() else unantistuff() end
 end)
 
+-- ── Player Selection Panel ──
 local panelOpen = false
 local selectedPlayer = nil
 local playerPanel = Instance.new("Frame")
@@ -1883,6 +1913,7 @@ panelClose.MouseButton1Click:Connect(function()
     playerPanel.Visible = false
 end)
 
+-- ── TP functions ──
 local function setTeleportStatus(msg, color)
     local statusRow = targetTab:FindFirstChild("StatusRow")
     if statusRow then
@@ -2057,6 +2088,7 @@ makeButton(targetTab, "Select Target", function()
     if panelOpen then updatePlayerList() end
 end)
 
+-- ── SPECTATE FEATURE ──
 makeSectionRow(targetTab, "Spectate")
 
 local spectatePlayer = nil
@@ -2113,7 +2145,9 @@ local spectateToggleRow, setSpectateToggle, getSpectateToggle = makeToggle(targe
     end
 end)
 
+-- ==========================================
 -- AUTO TAB (unchanged)
+-- ==========================================
 local autoS = scrolls["Auto"]
 
 makeSectionRow(autoS, "M1 Assist")
@@ -2408,7 +2442,9 @@ makeToggle(autoS, "Auto Garuda Rebound", false, function(state)
     end
 end)
 
+-- ==========================================
 -- EXTRA TAB (Emote Unlocker + Item Grabber + Misc)
+-- ==========================================
 local extraS = scrolls["Extra"]
 
 makeSectionRow(extraS, "Emotes")
@@ -2659,7 +2695,9 @@ makeButton(extraS, "Copy Server ID", function()
     setclipboard(game.JobId)
 end)
 
+-- ==========================================
 -- CONFIGS TAB
+-- ==========================================
 local configS = scrolls["Configs"]
 
 makeSectionRow(configS, "UI Settings")
@@ -2689,7 +2727,9 @@ credText.TextXAlignment = Enum.TextXAlignment.Center
 credText.ZIndex = 101
 credText.Parent = credLbl
 
+-- ==========================================
 -- RESET ON RESPAWN
+-- ==========================================
 LocalPlayer.CharacterAdded:Connect(function()
     tpBypassOn = false
     unantistuff()
@@ -2719,3 +2759,4 @@ task.defer(function()
 end)
 
 print("KZM v3.1 loaded — Force Reset silent, Emote Unlocker silent, Fly animation improved with dynamic pose and effects.")
+
