@@ -1721,7 +1721,9 @@ end)
 -- 1HP button (one‑shot kill)
 makeButton(combatS, "1HP", function()
     pcall(function()
-        replicatesignal(game.Players.LocalPlayer.Kill)
+        if type(replicatesignal) == "function" then
+            replicatesignal(game.Players.LocalPlayer.Kill)
+        end
     end)
 end, C.red)
 
@@ -2748,13 +2750,15 @@ end)
 
 -- Auto-start always-on features
 task.defer(function()
-    startM1Assist()
-    startAutoBurst()
-    perfectSwapActive = true
-    local char = LocalPlayer.Character
-    if char then setupPerfectSwap(char) end
-    perfectSwapCharConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
-        if perfectSwapActive then setupPerfectSwap(newChar) end
+    pcall(startM1Assist)
+    pcall(startAutoBurst)
+    pcall(function()
+        perfectSwapActive = true
+        local char = LocalPlayer.Character
+        if char then setupPerfectSwap(char) end
+        perfectSwapCharConn = LocalPlayer.CharacterAdded:Connect(function(newChar)
+            if perfectSwapActive then setupPerfectSwap(newChar) end
+        end)
     end)
 end)
 
